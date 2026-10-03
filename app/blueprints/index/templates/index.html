@@ -1,0 +1,32 @@
+{% extends 'layout.html' %}
+{% from '_macros.html' import star_total %}
+{% block content %}
+<section class="mb-4">
+	<p class="font-code small text-uppercase mb-1" style="color: var(--c-primary); letter-spacing: .06em;">R5.A.05 · Programmation avancée</p>
+	<h1 class="fw-bold mb-2" style="letter-spacing: -0.02em;">Prépare le contrôle Flask, une notion à la fois</h1>
+	<p class="text-muted-2 mb-3" style="max-width: 62ch;">Blueprints, ORM SQLAlchemy, mixins, DAO et services : des exercices courts, puis des sujets « papier » chronométrés. Tout est ouvert, fais ce que tu veux dans l'ordre que tu veux.</p>
+	<div class="card-app p-3" style="max-width: 520px;">
+		{{ star_total(total, 'Progression globale') }}
+	</div>
+</section>
+
+<div class="row g-3">
+	{% for c in cards %}
+	{% set s = c.session %}
+	<div class="col-12 col-sm-6 col-lg-3">
+		<a class="card-app session-card" href="{{ url_for('exam.exam_list') if s.is_exam else url_for('sessions.session_view', session_id=s.id) }}">
+			<span class="num">{{ 'Examen' if s.is_exam else 'Session ' ~ s.id }}</span>
+			<h2>{{ s.title }}</h2>
+			<p class="small text-muted-2 flex-grow-1">{{ s.subtitle }}</p>
+			{{ star_total(c.stars, s.lessons|length ~ (' sujets' if s.is_exam else ' leçons')) }}
+		</a>
+	</div>
+	{% endfor %}
+</div>
+
+{% if not cards %}
+<div class="card-app p-4 mt-3">
+	<p class="mb-0">Aucun contenu en base. Lance <code>python seed.py</code> puis recharge la page.</p>
+</div>
+{% endif %}
+{% endblock %}

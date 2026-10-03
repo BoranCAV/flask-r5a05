@@ -1,0 +1,24 @@
+{% extends 'layout.html' %}
+{% from '_macros.html' import stars, star_total %}
+{% block content %}
+<nav aria-label="Fil d'Ariane" class="small mb-2"><a href="{{ url_for('index.index') }}">Accueil</a> / Contrôle blanc</nav>
+<header class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+	<div>
+		<h1 class="fw-bold mb-1" style="letter-spacing: -0.02em;">{{ course.title }}</h1>
+		<p class="text-muted-2 mb-0" style="max-width: 62ch;">{{ course.subtitle }}</p>
+	</div>
+	<div class="card-app p-3" style="min-width: 260px;">{{ star_total(total, 'Étoiles') }}</div>
+</header>
+<div class="row g-3">
+	{% for l in course.lessons %}
+	<div class="col-md-6">
+		<a class="card-app session-card" href="{{ url_for('exam.exam_view', lesson_id=l.id) }}">
+			<span class="num">Sujet {{ loop.index }} · 1 h 30 · /20</span>
+			<h2>{{ l.title }}</h2>
+			<p class="small text-muted-2 flex-grow-1">Questions de cours + 3 exercices de code, chronomètre, corrigé détaillé et grille de barème.</p>
+			{{ stars(l.stars) }}
+		</a>
+	</div>
+	{% endfor %}
+</div>
+{% endblock %}

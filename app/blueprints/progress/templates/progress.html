@@ -1,0 +1,44 @@
+{% extends 'layout.html' %}
+{% from '_macros.html' import star_total %}
+{% block content %}
+<nav aria-label="Fil d'Ariane" class="small mb-2"><a href="{{ url_for('index.index') }}">Accueil</a> / Progression</nav>
+<h1 class="fw-bold mb-4" style="letter-spacing: -0.02em;">Ma progression</h1>
+
+<div class="row g-3">
+	<div class="col-lg-8">
+		{% for r in rows %}
+		<section class="card-app p-3 mb-3">
+			<div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
+				<h2 class="h5 fw-bold mb-0"><a href="{{ url_for('exam.exam_list') if r.session.is_exam else url_for('sessions.session_view', session_id=r.session.id) }}" class="text-decoration-none">{{ r.session.title }}</a></h2>
+			</div>
+			{{ star_total(r.stars, 'Total') }}
+			{% if not r.session.is_exam %}
+			<div class="row g-2 mt-1">
+				{% for p in r.paliers %}
+				<div class="col-6 col-md-3">{{ star_total(p.stars, 'P' ~ p.palier.number ~ ' · ' ~ p.palier.name) }}</div>
+				{% endfor %}
+			</div>
+			{% endif %}
+		</section>
+		{% endfor %}
+	</div>
+	<div class="col-lg-4">
+		<section class="card-app p-3">
+			<h2 class="h5 fw-bold">Notions les plus ratées</h2>
+			{% if weak %}
+			<ul class="list-unstyled mb-3">
+				{% for w in weak %}
+				<li class="mb-2">
+					<div class="d-flex justify-content-between small"><span class="tag">{{ w.tag }}</span><span class="font-code">{{ w.score }} % · {{ w.count }} essai{{ 's' if w.count > 1 }}</span></div>
+					<div class="progress mt-1" role="progressbar" aria-label="Score moyen {{ w.tag }}" aria-valuenow="{{ w.score }}" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar" style="width: {{ w.score }}%"></div></div>
+				</li>
+				{% endfor %}
+			</ul>
+			<a class="btn btn-primary w-100" href="{{ url_for('progress.revision') }}">Réviser mes points faibles</a>
+			{% else %}
+			<p class="text-muted-2 small mb-0">Rien à signaler pour l'instant : les notions ratées apparaîtront ici dès tes premiers exercices.</p>
+			{% endif %}
+		</section>
+	</div>
+</div>
+{% endblock %}

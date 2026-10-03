@@ -1,0 +1,2100 @@
+session:
+  id: 2
+  title: "ORM et mixins"
+  subtitle: "SQLAlchemy déclaratif, sessions, requêtes, relations 1-N / 1-1 / N-N, cascades, chargement, mixins et MRO."
+
+lessons:
+  # ===================================================================== PALIER 1
+  - id: "2.1"
+    palier: 1
+    title: "Pourquoi un ORM ?"
+    memo: |
+      - **ORM** (Object Relational Mapping) : une couche d'abstraction qui synchronise le schéma SQL et les classes Python.
+      - Une table correspond à une classe (un modèle), une ligne à une instance, une colonne à un attribut de type `Column`.
+      - SQLAlchemy propose deux approches. L'approche **déclarative**, utilisée dans le cours, part du modèle Python. L'approche manuelle (impérative) part du schéma.
+      - `engine = create_engine("sqlite:///films.db", echo=True)` : le moteur lié à la base. Avec `echo=True`, il affiche les requêtes SQL générées.
+      - `Base = declarative_base()` : la classe de base dont héritent tous les modèles.
+      - `Base.metadata.create_all(engine)` crée toutes les tables des modèles qui héritent de `Base`.
+      - On n'écrit plus de SQL à la main, mais la logique SQL (clés, jointures) reste indispensable.
+    example: |
+      from sqlalchemy.orm import declarative_base, sessionmaker
+      from sqlalchemy import Column, Integer, String, TIMESTAMP
+      from sqlalchemy import create_engine, func
+
+      # moteur lié à la base ; echo=True affiche le SQL généré
+      engine = create_engine("sqlite:///films.db", echo=True)
+
+      # base déclarative : tous les modèles en héritent
+      Base = declarative_base()
+
+      class Film(Base):
+          __tablename__ = "films"
+          id = Column(Integer, primary_key=True)
+          titre = Column(String, nullable=False)
+
+      def creation():
+          Base.metadata.create_all(engine)    # crée les tables d'après les modèles
+    exercises:
+      - type: qcm
+        tags: [orm-principe]
+        enonce: "Avec un ORM, à quoi correspond une **ligne** d'une table ?"
+        choices: ["À une instance du modèle", "À une classe", "À un attribut `Column`", "À une session"]
+        answer: 0
+        explication: "Table ↔ classe, ligne ↔ instance, colonne ↔ attribut."
+      - type: vf
+        tags: [engine]
+        enonce: "`create_engine(\"sqlite:///films.db\", echo=True)` affiche dans la console les requêtes SQL générées par l'ORM."
+        answer: true
+        explication: "`echo=True` active les journaux SQL : pratique pour voir ce que l'ORM fait réellement."
+      - type: qcm
+        tags: [declarative-base, orm-principe]
+        enonce: "Quelle approche de SQLAlchemy le cours utilise-t-il ?"
+        choices: ["Déclarative : on écrit les classes Python qui héritent de `Base`", "Impérative : on mappe à la main un schéma existant", "Uniquement le moteur SQL, sans ORM", "Aucune : on écrit du SQL brut"]
+        answer: 0
+        explication: "L'approche déclarative est la plus simple : le modèle Python décrit la table."
+      - type: trous
+        tags: [engine, declarative-base]
+        enonce: "Complète le début de `films.py`."
+        code: |
+          from sqlalchemy.orm import [[0]], sessionmaker
+          from sqlalchemy import create_engine
+
+          engine = [[1]]("sqlite:///films.db", echo=True)
+          Base = declarative_base()
+        blanks:
+          - ["declarative_base"]
+          - ["create_engine"]
+      - type: ordre
+        tags: [orm-principe, create-all]
+        enonce: "Remets dans l'ordre les étapes du petit test ORM du TD02."
+        lines:
+          - "Importer declarative_base, sessionmaker, Column, create_engine…"
+          - "Créer le moteur : engine = create_engine(...)"
+          - "Créer la base : Base = declarative_base()"
+          - "Déclarer le modèle class Film(Base) avec ses colonnes"
+          - "Créer les tables : Base.metadata.create_all(engine)"
+          - "Ouvrir une session et ajouter des films"
+      - type: relier
+        tags: [orm-principe]
+        enonce: "Relie chaque notion SQL à son équivalent ORM."
+        pairs:
+          - ["Table", "Classe qui hérite de Base (modèle)"]
+          - ["Ligne", "Instance du modèle"]
+          - ["Colonne", "Attribut déclaré avec Column(...)"]
+          - ["Schéma complet", "Base.metadata"]
+      - type: vf
+        tags: [orm-principe]
+        enonce: "Avec un ORM, il n'est plus nécessaire de comprendre la logique du SQL (clés étrangères, jointures)."
+        answer: false
+        explication: "Faux : on n'écrit plus le SQL, mais il faut toujours penser en clés, relations et jointures. Le TD02 insiste là-dessus."
+
+  - id: "2.2"
+    palier: 1
+    title: "Le modèle déclaratif : __tablename__ et Column"
+    memo: |
+      - `class Film(Base):` puis `__tablename__ = "films"` : le **nom de la table**, en minuscules et souvent au pluriel. C'est ce nom qu'utilise `ForeignKey`.
+      - `id = Column(Integer, primary_key=True)` : la clé primaire, auto-incrémentée par défaut.
+      - Les types : `Integer`, `String(150)`, `Text`, `Float`, `DateTime`, `TIMESTAMP`.
+      - Les options : `nullable=False` (NOT NULL), `unique=True`, `index=True`, `default=0`, `default=func.current_timestamp()`.
+      - `Base.metadata.create_all(engine)` crée les tables qui n'existent pas encore.
+      - Le constructeur `__init__` est facultatif : SQLAlchemy accepte `Film(titre="2046")`. Le cours en écrit souvent un.
+    example: |
+      class Actor(Base, BaseModelMixin):
+          """un acteur"""
+          __tablename__ = 'actors'                       # nom de la table
+
+          id = Column(Integer, primary_key=True, autoincrement=True)
+          name = Column(String(150), unique=True, nullable=False, index=True)
+
+          def __init__(self, name=None):
+              self.name = name                           # l'id est auto-incrémenté
+    exercises:
+      - type: qcm
+        tags: [tablename]
+        enonce: "Quel attribut de classe fixe le nom de la table SQL d'un modèle ?"
+        choices: ["`__tablename__`", "`__table__`", "`__name__`", "`table_name`"]
+        answer: 0
+        explication: "`__tablename__ = 'actors'`. Ensuite, `__table__` est l'objet `Table` que SQLAlchemy construit à partir du modèle."
+      - type: trous
+        tags: [column-options]
+        enonce: "Complète la colonne `name` : texte de 150 caractères maximum, obligatoire, unique et indexé."
+        code: |
+          name = Column([[0]](150), [[1]]=True, nullable=[[2]], index=True)
+        blanks:
+          - ["String"]
+          - ["unique"]
+          - ["False"]
+      - type: vf
+        tags: [column-options]
+        enonce: "Une colonne `Column(Integer, primary_key=True)` est auto-incrémentée par défaut."
+        answer: true
+        explication: "Vrai pour une clé primaire entière seule. Le cours ajoute parfois `autoincrement=True` pour être explicite."
+      - type: relier
+        tags: [column-options]
+        enonce: "Relie chaque option de `Column` à son effet."
+        pairs:
+          - ["primary_key=True", "Clé primaire de la table"]
+          - ["nullable=False", "Valeur obligatoire (NOT NULL)"]
+          - ["unique=True", "Deux lignes ne peuvent pas avoir la même valeur"]
+          - ["index=True", "Index pour accélérer les recherches sur cette colonne"]
+          - ["default=0", "Valeur utilisée si rien n'est fourni à l'insertion"]
+      - type: ordre
+        tags: [tablename, column-options]
+        enonce: "Remets dans l'ordre le modèle `Film` du TD02."
+        lines:
+          - "class Film(Base):"
+          - "    __tablename__ = \"films\""
+          - "    id = Column(Integer, primary_key=True)"
+          - "    created = Column(TIMESTAMP, default=func.current_timestamp())"
+          - "    titre = Column(String, nullable=False)"
+          - "    qualite = Column(Integer, default=0)"
+        explication: "On déclare la classe, puis `__tablename__`, puis les colonnes. L'ordre des colonnes suit ici celui du TD."
+      - type: qcm
+        tags: [create-all]
+        enonce: "Que fait `Base.metadata.create_all(engine)` ?"
+        choices:
+          - "Elle crée dans la base toutes les tables des modèles qui héritent de `Base` (si elles n'existent pas)"
+          - "Elle insère des lignes de test"
+          - "Elle supprime puis recrée toutes les tables"
+          - "Elle ouvre une session"
+        answer: 0
+
+  - id: "2.3"
+    palier: 1
+    title: "Les sessions : add, commit, close"
+    memo: |
+      - `Session = sessionmaker(bind=engine)` : une **fabrique** de sessions, liée au moteur.
+      - `session = Session()` : une session, c'est-à-dire une transaction avec la base.
+      - `session.add(film)` / `session.add_all([f1, f2])` : ajoute les objets à la session.
+      - `session.commit()` **persiste** les changements. Sans commit, rien n'est écrit dans la base.
+      - `session.rollback()` annule la transaction en cours, par exemple après une erreur.
+      - `session.close()` ferme la session. Bonne pratique : des sessions **courtes**, toujours fermées.
+      - `sessionmaker(bind=engine, expire_on_commit=False)` : les objets restent lisibles après le commit et la fermeture (utilisé dans le DAO du TD02).
+    example: |
+      def remplir():
+          Session = sessionmaker(bind=engine)      # fabrique de sessions
+          session = Session()                      # une session (transaction)
+          data = [("2046", 10), ("Mon nom est personne", 7)]
+          films = [Film(titre=d[0], qualite=d[1]) for d in data]
+          session.add_all(films)                   # ajout
+          session.commit()                         # persistance
+          session.close()                          # fermeture
+
+      def explorer():
+          Session = sessionmaker(bind=engine)
+          session = Session()
+          for f in session.query(Film).all():
+              print(f.titre)
+          session.close()
+    exercises:
+      - type: ordre
+        tags: [session-orm, commit, close]
+        enonce: "Remets dans l'ordre la fonction `remplir()`."
+        lines:
+          - "Session = sessionmaker(bind=engine)"
+          - "session = Session()"
+          - "films = [Film(titre=t) for t in ['2046', 'Star Wars 7']]"
+          - "session.add_all(films)"
+          - "session.commit()"
+          - "session.close()"
+      - type: qcm
+        tags: [commit]
+        enonce: "On fait `session.add(film)` puis `session.close()`, sans `commit()`. Le film est-il en base ?"
+        choices: ["Non : sans commit, la transaction est annulée", "Oui, `add` suffit", "Oui, `close` fait un commit", "Seulement si `echo=True`"]
+        answer: 0
+        explication: "`commit()` persiste les changements. Fermer une session qui n'a pas été commitée annule la transaction."
+      - type: qcm
+        tags: [commit, close]
+        enonce: "Quelles **deux** lignes manquent après `session.add_all(films)` dans l'exemple « Quelle est l'erreur ? » du CM02 ?"
+        choices: ["`session.commit()`", "`session.close()`", "`session.rollback()`", "`Base.metadata.create_all(engine)`"]
+        answer: [0, 1]
+        explication: "Il faut persister les changements (`commit`), puis fermer la connexion (`close`)."
+      - type: vf
+        tags: [session-orm]
+        enonce: "`sessionmaker(bind=engine)` renvoie directement une session prête à l'emploi."
+        answer: false
+        explication: "Faux : il renvoie une **classe** (une fabrique). On l'appelle ensuite (`Session()`) pour obtenir une session."
+      - type: trous
+        tags: [session-orm, query]
+        enonce: "Complète `explorer()`, qui affiche tous les films."
+        code: |
+          def explorer():
+              Session = sessionmaker(bind=engine)
+              session = [[0]]
+              res = session.[[1]](Film).[[2]]()
+              for r in res:
+                  print(r.to_dict())
+              session.[[3]]()
+        blanks:
+          - ["Session()"]
+          - ["query"]
+          - ["all"]
+          - ["close"]
+      - type: relier
+        tags: [session-orm, commit, close]
+        enonce: "Relie chaque méthode de session à son effet."
+        pairs:
+          - ["add_all", "Ajoute une liste d'objets à la session"]
+          - ["commit", "Écrit définitivement les changements en base"]
+          - ["rollback", "Annule les changements non commités"]
+          - ["close", "Ferme la session et libère la connexion"]
+
+  # ===================================================================== PALIER 2
+  - id: "2.4"
+    palier: 2
+    title: "Requêter sans SQL : query, filter, order_by, distinct, ilike"
+    memo: |
+      - `session.query(Movie)` part de la table des films. On enchaîne ensuite les méthodes.
+      - `.filter(Movie.year == 1999)` (avec **`==`**), `.filter(Movie.year.isnot(None))`, `.filter(Director.name.ilike(f"%{name}%"))` (insensible à la casse).
+      - `.order_by(Movie.title)`, `.order_by(Movie.year.desc())`, `.limit(10)`, `.distinct()`.
+      - Fin de chaîne : `.all()` (une liste), `.first()` (un objet ou `None`), `.count()` (un entier).
+      - `session.query(Movie.year)` ne sélectionne qu'une colonne. Le résultat est une liste de **tuples**, d'où `[y[0] for y in years]`.
+      - Mettre la chaîne entre parenthèses permet de l'écrire sur plusieurs lignes.
+    example: |
+      def getMoviesYears(self):
+          """années distinctes et triées"""
+          session = self.mdao.connect()
+          try:
+              years = (
+                  session.query(Movie.year)
+                  .filter(Movie.year.isnot(None))
+                  .distinct()
+                  .order_by(Movie.year)
+                  .all()
+              )
+              return [y[0] for y in years]      # liste de tuples → liste d'entiers
+          finally:
+              session.close()
+    exercises:
+      - type: trous
+        tags: [query, filter]
+        enonce: "Complète la requête qui renvoie les films de 1999."
+        code: |
+          movies = session.query(Movie).[[0]](Movie.year [[1]] 1999).[[2]]()
+        blanks:
+          - ["filter"]
+          - ["=="]
+          - ["all"]
+        explication: "`filter` attend une expression de comparaison : on écrit `==`, pas `=`."
+      - type: trous
+        tags: [query, distinct]
+        enonce: "Complète `getMoviesYears()`."
+        code: |
+          years = (
+              session.query(Movie.year)
+              .filter(Movie.year.[[0]](None))
+              .[[1]]()
+              .order_by(Movie.year)
+              .all()
+          )
+          return [y[[[2]]] for y in years]
+        blanks:
+          - ["isnot"]
+          - ["distinct"]
+          - ["0"]
+      - type: qcm
+        tags: [query]
+        enonce: "Que renvoie `session.query(Movie).filter(Movie.id == 999).first()` si aucun film n'a l'id 999 ?"
+        choices: ["`None`", "`[]`", "Une exception `NoResultFound`", "`0`"]
+        answer: 0
+        explication: "`first()` renvoie le premier résultat ou `None`. C'est `all()` qui renverrait `[]`."
+      - type: ordre
+        tags: [query, try-finally]
+        enonce: "Remets dans l'ordre la méthode du DAO ORM (session toujours fermée)."
+        lines:
+          - "def findByYear(self, year):"
+          - "    session = self.connect()"
+          - "    try:"
+          - "        return session.query(Movie).filter(Movie.year == year).all()"
+          - "    finally:"
+          - "        session.close()"
+      - type: relier
+        tags: [query, filter, ilike, distinct]
+        enonce: "Relie chaque méthode à ce qu'elle fait."
+        pairs:
+          - [".filter(...)", "Garde les lignes qui vérifient une condition (WHERE)"]
+          - [".order_by(...)", "Trie les résultats (ORDER BY)"]
+          - [".distinct()", "Supprime les doublons"]
+          - [".count()", "Renvoie le nombre de lignes"]
+          - [".ilike('%x%')", "Comparaison de texte insensible à la casse avec jokers"]
+      - type: qcm
+        tags: [query]
+        enonce: "Que contient `session.query(Movie.year).distinct().all()` ?"
+        choices: ["Une liste de tuples, par exemple `[(1999,), (2004,)]`", "Une liste d'entiers `[1999, 2004]`", "Une liste d'objets `Movie`", "Un seul entier"]
+        answer: 0
+        explication: "Une requête sur des colonnes renvoie des lignes (des tuples). D'où `[y[0] for y in years]`."
+      - type: trous
+        tags: [ilike, filter]
+        enonce: "Complète la recherche des réalisateurs dont le nom **contient** `name`, sans tenir compte de la casse."
+        code: |
+          session.query(Director).filter(Director.name.[[0]](f"[[1]]")).all()
+        blanks:
+          - ["ilike"]
+          - ["%{name}%"]
+
+  - id: "2.5"
+    palier: 2
+    title: "Relations 1-N / N-1 : ForeignKey, relationship, back_populates"
+    memo: |
+      - Côté **N** (l'enfant, ex. `Movie`) : `director_id = Column(Integer, ForeignKey('directors.id'))`. On y écrit le **nom de la table**.
+      - Côté N toujours : `director = relationship('Director', back_populates='movies')`. On y écrit le **nom de la classe**.
+      - Côté **1** (le parent, ex. `Director`) : `movies = relationship('Movie', back_populates='director')`. C'est une collection, d'où le pluriel.
+      - `back_populates` se met **des deux côtés**, et chacun donne le nom de l'attribut d'en face.
+      - La clé étrangère est toujours du côté N.
+      - À l'usage : `movie.director.name` (un objet) et `director.movies` (une liste).
+    example: |
+      class Director(Base, BaseModelMixin):
+          __tablename__ = 'directors'
+          id = Column(Integer, primary_key=True, autoincrement=True)
+          name = Column(String(150), unique=True, nullable=False)
+          # 1-N : un réalisateur possède une collection de films
+          movies = relationship('Movie', back_populates='director')
+
+      class Movie(Base, BaseModelMixin):
+          __tablename__ = 'movies'
+          id = Column(Integer, primary_key=True, autoincrement=True)
+          title = Column(String(255), nullable=False)
+          # N-1 : clé étrangère vers la TABLE directors
+          director_id = Column(Integer, ForeignKey('directors.id', ondelete='SET NULL'), nullable=True)
+          director = relationship('Director', back_populates='movies')
+    exercises:
+      - type: trous
+        tags: [relation-1N, foreign-key, back-populates]
+        enonce: "Complète le côté N (`Movie`) de la relation avec `Director`."
+        code: |
+          director_id = Column(Integer, ForeignKey([[0]]), nullable=True)
+          director = relationship([[1]], back_populates=[[2]])
+        blanks:
+          - ["'directors.id'"]
+          - ["'Director'"]
+          - ["'movies'"]
+        indices: ["`ForeignKey` prend `table.colonne`, et `relationship` prend le nom de la **classe**."]
+      - type: trous
+        tags: [relation-1N, back-populates]
+        enonce: "Complète le côté 1 (`Director`)."
+        code: |
+          class Director(Base, BaseModelMixin):
+              __tablename__ = 'directors'
+              id = Column(Integer, primary_key=True)
+              [[0]] = relationship('Movie', back_populates=[[1]])
+        blanks:
+          - ["movies"]
+          - ["'director'"]
+      - type: qcm
+        tags: [foreign-key, relation-1N]
+        enonce: "Un réalisateur a plusieurs films, et un film a un seul réalisateur. Dans quelle table met-on la clé étrangère ?"
+        choices: ["`movies` (côté N)", "`directors` (côté 1)", "Dans une table d'association", "Dans les deux tables"]
+        answer: 0
+        explication: "Chaque film pointe vers **son** réalisateur, donc la FK `director_id` est dans `movies`."
+      - type: ordre
+        tags: [relation-1N, foreign-key]
+        enonce: "Remets dans l'ordre le modèle `Review`, qui est en N-1 avec `Movie`."
+        lines:
+          - "class Review(Base, BaseModelMixin):"
+          - "    __tablename__ = 'reviews'"
+          - "    id = Column(Integer, primary_key=True, autoincrement=True)"
+          - "    movie_id = Column(Integer, ForeignKey('movies.id', ondelete='CASCADE'), nullable=False)"
+          - "    movie = relationship('Movie', back_populates='reviews')"
+      - type: relier
+        tags: [foreign-key, back-populates]
+        enonce: "Relie chaque élément à ce qu'on y écrit."
+        pairs:
+          - ["ForeignKey('…')", "Le nom de la table et la colonne : 'directors.id'"]
+          - ["relationship('…')", "Le nom de la classe cible : 'Director'"]
+          - ["back_populates='…'", "Le nom de l'attribut de la relation d'en face"]
+          - ["Côté 1 de la relation", "Un attribut au pluriel qui contient une liste"]
+      - type: qcm
+        tags: [relation-1N]
+        enonce: "Que vaut `director.movies` pour un réalisateur qui a 3 films ?"
+        choices: ["Une liste de 3 objets `Movie`", "L'entier 3", "Le premier film", "Une requête pas encore exécutée"]
+        answer: 0
+      - type: vf
+        tags: [back-populates]
+        enonce: "Il suffit de déclarer `back_populates` d'un seul côté de la relation."
+        answer: false
+        explication: "Faux : avec `back_populates`, on déclare la relation **des deux côtés**, et chacun nomme l'attribut de l'autre."
+
+  - id: "2.6"
+    palier: 2
+    title: "Relations 1-1 et N-N : uselist, Table d'association, secondary"
+    memo: |
+      - **1-1**, côté parent : `detail = relationship('MovieDetail', back_populates='movie', uselist=False)`. On obtient un objet, pas une liste.
+      - 1-1, côté enfant : `movie_id = Column(Integer, ForeignKey('movies.id', ondelete='CASCADE'), unique=True, nullable=False, index=True)`. Le `unique=True` garantit qu'il y a un seul détail par film.
+      - **N-N** : une table d'association sans classe, dans `associations.py` :
+      - `movie_genres = Table('movie_genres', Base.metadata, Column('movie_id', Integer, ForeignKey('movies.id', ondelete='CASCADE'), primary_key=True), Column('genre_id', ...))`
+      - Des deux côtés : `genres = relationship('Genre', secondary=movie_genres, back_populates='movies')`.
+      - La clé primaire est composée des deux colonnes : un couple (film, genre) n'apparaît qu'une fois.
+    example: |
+      # associations.py
+      movie_genres = Table(
+          'movie_genres',
+          Base.metadata,
+          Column('movie_id', Integer, ForeignKey('movies.id', ondelete='CASCADE'), primary_key=True),
+          Column('genre_id', Integer, ForeignKey('genres.id', ondelete='CASCADE'), primary_key=True)
+      )
+
+      class Genre(Base, BaseModelMixin):
+          __tablename__ = 'genres'
+          id = Column(Integer, primary_key=True)
+          name = Column(String(100), unique=True, nullable=False)
+          movies = relationship('Movie', secondary=movie_genres, back_populates='genres')
+
+      # dans Movie :
+      # genres = relationship('Genre', secondary=movie_genres, back_populates='movies')
+      # detail = relationship('MovieDetail', back_populates='movie', uselist=False, cascade='all, delete-orphan')
+    exercises:
+      - type: trous
+        tags: [association-table, relation-NN]
+        enonce: "Complète la table d'association entre `movies` et `actors`."
+        code: |
+          movie_actors = [[0]](
+              'movie_actors',
+              [[1]],
+              Column('movie_id', Integer, ForeignKey('movies.id', ondelete='CASCADE'), [[2]]=True),
+              Column('actor_id', Integer, ForeignKey([[3]], ondelete='CASCADE'), primary_key=True)
+          )
+        blanks:
+          - ["Table"]
+          - ["Base.metadata"]
+          - ["primary_key"]
+          - ["'actors.id'"]
+      - type: trous
+        tags: [relation-NN, back-populates]
+        enonce: "Complète la relation N-N dans `Actor`."
+        code: |
+          movies = relationship(
+              'Movie',
+              [[0]]=movie_actors,
+              back_populates=[[1]]
+          )
+        blanks:
+          - ["secondary"]
+          - ["'actors'"]
+      - type: qcm
+        tags: [relation-11]
+        enonce: "À quoi sert `uselist=False` dans `detail = relationship('MovieDetail', back_populates='movie', uselist=False)` ?"
+        choices: ["`movie.detail` renvoie un objet unique au lieu d'une liste", "Il interdit les doublons dans la table", "Il désactive la relation inverse", "Il charge le détail en même temps que le film"]
+        answer: 0
+      - type: ordre
+        tags: [association-table]
+        enonce: "Remets dans l'ordre la table `hero_powers` du TD03."
+        lines:
+          - "hero_powers = Table("
+          - "    'hero_powers',"
+          - "    Base.metadata,"
+          - "    Column('hero_id', Integer, ForeignKey('superheroes.id', ondelete='CASCADE'), primary_key=True),"
+          - "    Column('power_id', Integer, ForeignKey('powers.id', ondelete='CASCADE'), primary_key=True)"
+          - ")"
+      - type: relier
+        tags: [relation-1N, relation-11, relation-NN]
+        enonce: "Relie chaque type de relation à l'outil qui la caractérise."
+        pairs:
+          - ["1-1", "uselist=False côté parent + unique=True sur la FK"]
+          - ["1-N / N-1", "ForeignKey côté N + relationship des deux côtés"]
+          - ["N-N", "Table d'association + secondary=..."]
+      - type: vf
+        tags: [association-table]
+        enonce: "Il faut écrire une classe modèle (qui hérite de `Base`) pour chaque table d'association comme `movie_genres`."
+        answer: false
+        explication: "Faux : une table d'association sans données propres est un simple objet `Table`. Elle n'a pas de classe."
+      - type: qcm
+        tags: [relation-11, column-options]
+        enonce: "Pourquoi `unique=True` sur `MovieDetail.movie_id` ?"
+        choices: ["Pour garantir en base qu'un film a au plus un détail (relation 1-1)", "Pour accélérer les jointures", "Parce qu'une clé étrangère doit toujours être unique", "Pour activer la cascade"]
+        answer: 0
+
+  # ===================================================================== PALIER 3
+  - id: "2.7"
+    palier: 3
+    title: "Cascades et suppressions"
+    memo: |
+      - `ForeignKey('movies.id', ondelete='CASCADE')` agit **dans la base** : supprimer le film supprime ses lignes filles.
+      - `ForeignKey('directors.id', ondelete='SET NULL')` met la clé à NULL quand le parent disparaît. La colonne doit alors être `nullable=True`.
+      - `cascade='all, delete-orphan'`, sur la `relationship` du **parent**, agit **dans l'ORM** : `session.delete(movie)` supprime aussi son détail et ses avis, et un enfant retiré de la collection (un orphelin) est supprimé.
+      - Sans cascade de suppression, SQLAlchemy met à NULL la clé des enfants quand on supprime le parent.
+      - `default=datetime.utcnow` **sans parenthèses** : la fonction est appelée à chaque insertion. Avec `()`, la date serait figée au chargement du module.
+      - `default=func.current_timestamp()` : c'est la base qui calcule la valeur.
+    example: |
+      class Movie(Base, BaseModelMixin):
+          __tablename__ = 'movies'
+          id = Column(Integer, primary_key=True)
+          # le film disparaît → ses avis aussi (ORM)
+          reviews = relationship('Review', back_populates='movie', cascade='all, delete-orphan')
+
+      class Review(Base, BaseModelMixin):
+          __tablename__ = 'reviews'
+          id = Column(Integer, primary_key=True)
+          # le film disparaît → ses avis aussi (base de données)
+          movie_id = Column(Integer, ForeignKey('movies.id', ondelete='CASCADE'), nullable=False)
+          created_at = Column(DateTime, default=datetime.utcnow)     # sans () !
+          movie = relationship('Movie', back_populates='reviews')
+    exercises:
+      - type: qcm
+        tags: [ondelete]
+        enonce: "`director_id = Column(Integer, ForeignKey('directors.id', ondelete='SET NULL'), nullable=True)`. Que devient un film quand on supprime son réalisateur ?"
+        choices: ["Il reste, avec `director_id` à NULL", "Il est supprimé", "La suppression du réalisateur est refusée", "Il est rattaché au réalisateur suivant"]
+        answer: 0
+      - type: trous
+        tags: [cascade, relation-1N]
+        enonce: "Complète pour que la suppression d'un héros supprime ses missions, y compris les missions retirées de sa liste."
+        code: |
+          missions = relationship(
+              'Mission',
+              back_populates='superhero',
+              cascade=[[0]]
+          )
+        blanks: [["'all, delete-orphan'"]]
+      - type: bug
+        tags: [default-callable]
+        enonce: "Toutes les critiques enregistrées ont exactement la même date de création, celle du démarrage du serveur. Pourquoi ?"
+        code: |
+          class Review(Base, BaseModelMixin):
+              __tablename__ = 'reviews'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              rating = Column(Integer, nullable=False)
+              created_at = Column(DateTime, default=datetime.utcnow())
+        fixes:
+          5: ["created_at = Column(DateTime, default=datetime.utcnow)", "created_at = Column(DateTime, default=datetime.now)", "created_at = Column(DateTime, default=func.current_timestamp())"]
+        explication: "`datetime.utcnow()` est évalué **une fois**, au chargement de la classe. Il faut passer la fonction elle-même (`datetime.utcnow`), que SQLAlchemy appelle à chaque insertion."
+      - type: bug
+        tags: [ondelete, column-options]
+        enonce: "Supprimer une ville provoque une erreur d'intégrité sur les héros. Corrige la colonne pour que le héros reste sans ville."
+        code: |
+          class Superhero(Base, BaseModelMixin):
+              __tablename__ = 'superheroes'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(100), nullable=False)
+              city_id = Column(Integer, ForeignKey('cities.id', ondelete='SET NULL'), nullable=False)
+              city = relationship('City', back_populates='superheroes')
+        fixes:
+          5: ["city_id = Column(Integer, ForeignKey('cities.id', ondelete='SET NULL'), nullable=True)", "city_id = Column(Integer, ForeignKey('cities.id', ondelete='SET NULL'))"]
+        explication: "`SET NULL` est impossible sur une colonne `nullable=False`."
+      - type: code
+        tags: [cascade, relation-1N, ondelete]
+        enonce: |
+          Domaine musique. Écris `Album` (table `albums` : `id`, `title` obligatoire) et `Track` (table `tracks` : `id`, `title`, `album_id` obligatoire avec une FK en `ondelete='CASCADE'`), reliés en 1-N par `Album.tracks` et `Track.album`.
+          Supprimer un album doit supprimer ses pistes, et une piste retirée de `album.tracks` doit être supprimée.
+        starter: |
+          from sqlalchemy import Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import declarative_base, relationship
+
+          Base = declarative_base()
+
+
+          class Album(Base):
+              __tablename__ = 'albums'
+
+
+          class Track(Base):
+              __tablename__ = 'tracks'
+        tests: |
+          from sqlalchemy import create_engine, inspect
+          from sqlalchemy.orm import sessionmaker
+
+          def _session():
+              engine = create_engine("sqlite://")
+              Base.metadata.create_all(engine)
+              return sessionmaker(bind=engine)()
+
+          def test_fk():
+              """tracks.album_id est une FK vers albums.id, obligatoire, en ondelete CASCADE"""
+              col = Track.__table__.c.album_id
+              fks = list(col.foreign_keys)
+              assert fks and fks[0].target_fullname == "albums.id", "ForeignKey('albums.id', ...) : nom de la TABLE"
+              assert fks[0].ondelete == "CASCADE", "ajoute ondelete='CASCADE'"
+              assert col.nullable is False, "album_id doit être nullable=False"
+
+          def test_relations():
+              """Album.tracks et Track.album sont reliés par back_populates"""
+              rel = inspect(Album).relationships
+              assert "tracks" in rel and rel["tracks"].back_populates == "album", "tracks = relationship('Track', back_populates='album', ...)"
+              assert inspect(Track).relationships["album"].back_populates == "tracks"
+
+          def test_suppression_album():
+              """supprimer l'album supprime ses pistes"""
+              s = _session()
+              a = Album(title="Kind of Blue")
+              a.tracks = [Track(title="So What"), Track(title="Blue in Green")]
+              s.add(a)
+              s.commit()
+              s.delete(a)
+              s.commit()
+              assert s.query(Track).count() == 0, "les pistes restent : cascade='all, delete-orphan' sur Album.tracks"
+
+          def test_orphelin():
+              """une piste retirée de album.tracks est supprimée"""
+              s = _session()
+              a = Album(title="Blue Train")
+              t = Track(title="Moment's Notice")
+              a.tracks.append(t)
+              s.add(a)
+              s.commit()
+              a.tracks.remove(t)
+              s.commit()
+              assert s.query(Track).count() == 0, "l'orpheline n'est pas supprimée : il manque delete-orphan"
+        solution: |
+          from sqlalchemy import Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import declarative_base, relationship
+
+          Base = declarative_base()
+
+
+          class Album(Base):
+              __tablename__ = 'albums'
+              id = Column(Integer, primary_key=True)
+              title = Column(String(255), nullable=False)
+              tracks = relationship('Track', back_populates='album', cascade='all, delete-orphan')
+
+
+          class Track(Base):
+              __tablename__ = 'tracks'
+              id = Column(Integer, primary_key=True)
+              title = Column(String(255))
+              album_id = Column(Integer, ForeignKey('albums.id', ondelete='CASCADE'), nullable=False)
+              album = relationship('Album', back_populates='tracks')
+        indices:
+          - "La cascade ORM se déclare sur la relation du **parent** : `cascade='all, delete-orphan'`."
+          - "La FK : `ForeignKey('albums.id', ondelete='CASCADE')`, avec `nullable=False`."
+      - type: code
+        tags: [ondelete, relation-1N]
+        enonce: |
+          Domaine école. Écris `Classe` (table `classes` : `id`, `name` unique) et `Student` (table `students` : `id`, `name`, `classe_id`, une FK vers `classes.id` en `ondelete='SET NULL'`).
+          La relation 1-N passe par `Classe.students` et `Student.classe`. Supprimer une classe **ne doit pas** supprimer ses élèves : leur `classe_id` passe à `None`.
+        starter: |
+          from sqlalchemy import Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import declarative_base, relationship
+
+          Base = declarative_base()
+        tests: |
+          from sqlalchemy import create_engine, inspect
+          from sqlalchemy.orm import sessionmaker
+
+          def test_colonnes():
+              """tables classes et students, name unique"""
+              assert Classe.__tablename__ == "classes" and Student.__tablename__ == "students"
+              assert Classe.__table__.c.name.unique, "name = Column(String(...), unique=True, ...)"
+
+          def test_fk():
+              """students.classe_id : FK vers classes.id, ondelete SET NULL, nullable"""
+              col = Student.__table__.c.classe_id
+              fk = list(col.foreign_keys)[0]
+              assert fk.target_fullname == "classes.id" and fk.ondelete == "SET NULL"
+              assert col.nullable, "une colonne en SET NULL doit être nullable"
+
+          def test_relation():
+              """Classe.students ↔ Student.classe"""
+              assert inspect(Classe).relationships["students"].back_populates == "classe"
+              assert inspect(Student).relationships["classe"].back_populates == "students"
+
+          def test_suppression():
+              """supprimer la classe garde les élèves, avec classe_id à None"""
+              engine = create_engine("sqlite://")
+              Base.metadata.create_all(engine)
+              s = sessionmaker(bind=engine)()
+              c = Classe(name="BUT3-A")
+              c.students = [Student(name="Lina"), Student(name="Sami")]
+              s.add(c)
+              s.commit()
+              s.delete(c)
+              s.commit()
+              rest = s.query(Student).all()
+              assert len(rest) == 2, "les élèves ont été supprimés : pas de cascade de suppression ici"
+              assert all(st.classe_id is None for st in rest)
+        solution: |
+          from sqlalchemy import Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import declarative_base, relationship
+
+          Base = declarative_base()
+
+
+          class Classe(Base):
+              __tablename__ = 'classes'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(50), unique=True, nullable=False)
+              students = relationship('Student', back_populates='classe')
+
+
+          class Student(Base):
+              __tablename__ = 'students'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(100), nullable=False)
+              classe_id = Column(Integer, ForeignKey('classes.id', ondelete='SET NULL'), nullable=True)
+              classe = relationship('Classe', back_populates='students')
+        indices: ["Pas de `cascade` sur `Classe.students` : sans cascade, SQLAlchemy met la FK des enfants à NULL."]
+
+  - id: "2.8"
+    palier: 3
+    title: "Charger efficacement : lazy, joinedload, selectinload, N+1"
+    memo: |
+      - Le **lazy loading** est le comportement par défaut : une relation n'est chargée qu'au premier accès, avec une requête de plus **par objet**. Pour N films, ça fait 1 + N requêtes : c'est le **problème N+1**.
+      - Après `session.close()`, un accès lazy provoque `DetachedInstanceError`, typiquement dans un template.
+      - L'**eager loading** se fait avec `.options(...)` :
+      - `joinedload(Movie.director)` fait un LEFT OUTER JOIN dans la même requête. Idéal pour les relations **to-one** (`director`, `detail`).
+      - `selectinload(Movie.genres)` lance une 2e requête avec `IN (...)`, sans duplication. Idéal pour les **collections** (`genres`, `actors`, `reviews`).
+      - `_query_with_relations(session)` centralise ces options dans le DAO.
+      - `.join(Movie.genres).filter(Genre.name.ilike(x))` sert à **filtrer** sur une relation. Ce n'est pas du chargement.
+    example: |
+      def _query_with_relations(self, session):
+          """requête de base qui charge d'avance toutes les relations"""
+          return session.query(Movie).options(
+              joinedload(Movie.director),      # to-one : jointure
+              joinedload(Movie.detail),        # to-one : jointure
+              selectinload(Movie.genres),      # to-many : requête IN
+              selectinload(Movie.actors),
+              selectinload(Movie.reviews)
+          )
+
+      def findByGenre(self, genre_name):
+          session = self.connect()
+          try:
+              return (
+                  self._query_with_relations(session)
+                  .join(Movie.genres)                       # jointure pour filtrer
+                  .filter(Genre.name.ilike(genre_name))
+                  .all()
+              )
+          finally:
+              session.close()
+    exercises:
+      - type: qcm
+        tags: [n-plus-1, loading]
+        enonce: "On affiche 100 films et le nom de leur réalisateur, en lazy loading. Combien de requêtes SQL au maximum ?"
+        choices: ["101 : 1 pour les films + 1 par film", "1", "2", "100"]
+        answer: 0
+        explication: "C'est le problème N+1. `joinedload(Movie.director)` ramène tout en une seule requête."
+      - type: qcm
+        tags: [loading]
+        enonce: "Quelle stratégie le TD02 recommande-t-il pour `Movie.genres` (N-N) ?"
+        choices: ["`selectinload`", "`joinedload`", "Le lazy loading", "`subqueryload`"]
+        answer: 0
+        explication: "Pour une collection, `selectinload` fait une 2e requête avec IN, sans dupliquer les lignes des films."
+      - type: bug
+        tags: [loading]
+        enonce: "Le template plante avec `DetachedInstanceError` en lisant `movie.director.name`. Corrige la requête."
+        code: |
+          def findAll(self):
+              session = self.connect()
+              try:
+                  return session.query(Movie).all()
+              finally:
+                  session.close()
+        fixes:
+          4: ["return session.query(Movie).options(joinedload(Movie.director)).all()", "return self._query_with_relations(session).all()"]
+        explication: "La session est fermée avant que le template accède à `director`. Il faut charger la relation d'avance avec `joinedload`."
+      - type: bug
+        tags: [join, filter]
+        enonce: "Cette recherche par genre renvoie n'importe quoi (des doublons, des films sans le genre). Il manque une étape."
+        code: |
+          def findByGenre(self, genre_name):
+              session = self.connect()
+              try:
+                  return session.query(Movie).filter(Genre.name.ilike(genre_name)).all()
+              finally:
+                  session.close()
+        fixes:
+          4: ["return session.query(Movie).join(Movie.genres).filter(Genre.name.ilike(genre_name)).all()"]
+        explication: "Sans `.join(Movie.genres)`, la requête fait un produit cartésien entre films et genres."
+      - type: code
+        tags: [loading, dao-orm]
+        enonce: |
+          Les modèles `Artist`, `Album`, `Genre` et `Track` sont fournis. `Album.artist` est en N-1, `Album.genres` en N-N et `Album.tracks` en 1-N.
+          Écris la fonction `query_with_relations(session)`, qui renvoie `session.query(Album)` avec les bonnes options de chargement anticipé. Les relations doivent rester lisibles **après** `session.close()`.
+        setup: &music_models |
+          from sqlalchemy import Column, Integer, String, ForeignKey, Table, create_engine
+          from sqlalchemy.orm import declarative_base, relationship, sessionmaker, joinedload, selectinload
+          Base = declarative_base()
+          album_genres = Table('album_genres', Base.metadata,
+              Column('album_id', Integer, ForeignKey('albums.id', ondelete='CASCADE'), primary_key=True),
+              Column('genre_id', Integer, ForeignKey('genres.id', ondelete='CASCADE'), primary_key=True))
+          class Artist(Base):
+              __tablename__ = 'artists'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(150), unique=True, nullable=False)
+              albums = relationship('Album', back_populates='artist')
+          class Album(Base):
+              __tablename__ = 'albums'
+              id = Column(Integer, primary_key=True)
+              title = Column(String(255), nullable=False)
+              year = Column(Integer)
+              artist_id = Column(Integer, ForeignKey('artists.id', ondelete='CASCADE'))
+              artist = relationship('Artist', back_populates='albums')
+              genres = relationship('Genre', secondary=album_genres, back_populates='albums')
+              tracks = relationship('Track', back_populates='album', cascade='all, delete-orphan')
+          class Genre(Base):
+              __tablename__ = 'genres'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(100), unique=True, nullable=False)
+              albums = relationship('Album', secondary=album_genres, back_populates='genres')
+          class Track(Base):
+              __tablename__ = 'tracks'
+              id = Column(Integer, primary_key=True)
+              title = Column(String(255))
+              duration = Column(Integer, default=0)
+              album_id = Column(Integer, ForeignKey('albums.id', ondelete='CASCADE'), nullable=False)
+              album = relationship('Album', back_populates='tracks')
+          def _fill(engine):
+              Base.metadata.create_all(engine)
+              s = sessionmaker(bind=engine)()
+              jazz, modal, hardbop = Genre(name='Jazz'), Genre(name='Modal'), Genre(name='Hard bop')
+              miles, trane = Artist(name='Miles Davis'), Artist(name='John Coltrane')
+              a1 = Album(title='Kind of Blue', year=1959, artist=miles, genres=[jazz, modal])
+              a1.tracks = [Track(title='So What', duration=562), Track(title='Freddie Freeloader', duration=589)]
+              a2 = Album(title='Blue Train', year=1957, artist=trane, genres=[jazz, hardbop])
+              a2.tracks = [Track(title='Blue Train', duration=643)]
+              a3 = Album(title='Giant Steps', year=1960, artist=trane, genres=[jazz])
+              s.add_all([a1, a2, a3])
+              s.commit()
+              s.close()
+          class AlbumDAOInterface:
+              pass
+          class _DAOBase(AlbumDAOInterface):
+              def __init__(self, db_uri="sqlite://"):
+                  self.engine = create_engine(db_uri)
+                  self.SessionFactory = sessionmaker(bind=self.engine, expire_on_commit=False)
+              def connect(self):
+                  return self.SessionFactory()
+              def _query_with_relations(self, session):
+                  return session.query(Album).options(joinedload(Album.artist), selectinload(Album.genres), selectinload(Album.tracks))
+          fake_module("app.models.AlbumDAOInterface", AlbumDAOInterface=AlbumDAOInterface)
+          fake_module("app.models.Album", Album=Album)
+          fake_module("app.models.Genre", Genre=Genre)
+          fake_module("app.models.Artist", Artist=Artist)
+          fake_module("app.models.Track", Track=Track)
+        starter: |
+          def query_with_relations(session):
+              return session.query(Album)
+        tests: |
+          def _albums():
+              engine = create_engine("sqlite://")
+              _fill(engine)
+              session = sessionmaker(bind=engine, expire_on_commit=False)()
+              res = query_with_relations(session).order_by(Album.id).all()
+              session.close()
+              return res
+
+          def test_artist_apres_close():
+              """album.artist.name est lisible après session.close()"""
+              a = _albums()[0]
+              try:
+                  assert a.artist.name == "Miles Davis"
+              except Exception as e:
+                  raise AssertionError(f"{type(e).__name__} : la relation artist n'est pas chargée d'avance (joinedload)")
+
+          def test_genres_apres_close():
+              """album.genres est lisible après session.close()"""
+              a = _albums()[0]
+              try:
+                  assert sorted(g.name for g in a.genres) == ["Jazz", "Modal"]
+              except Exception as e:
+                  raise AssertionError(f"{type(e).__name__} : genres n'est pas chargé d'avance (selectinload)")
+
+          def test_tracks_apres_close():
+              """album.tracks est lisible après session.close()"""
+              a = _albums()[1]
+              try:
+                  assert [t.title for t in a.tracks] == ["Blue Train"]
+              except Exception as e:
+                  raise AssertionError(f"{type(e).__name__} : tracks n'est pas chargé d'avance (selectinload)")
+
+          def test_pas_de_doublons():
+              """la requête renvoie bien 3 albums, sans doublon"""
+              assert len(_albums()) == 3
+        solution: |
+          def query_with_relations(session):
+              return session.query(Album).options(
+                  joinedload(Album.artist),
+                  selectinload(Album.genres),
+                  selectinload(Album.tracks)
+              )
+        indices: ["Une relation to-one → `joinedload`, une collection → `selectinload`, le tout dans `.options(...)`."]
+        explication: "C'est la méthode `_query_with_relations` du `MovieSqliteORM`, transposée aux albums."
+      - type: code
+        tags: [join, ilike, loading]
+        enonce: |
+          Avec les mêmes modèles, écris `find_by_genre(session, name)`. Elle renvoie les albums qui ont un genre dont le nom correspond à `name`, sans tenir compte de la casse (`ilike`), triés par titre. Ses artistes sont chargés d'avance.
+        setup: *music_models
+        starter: |
+          def find_by_genre(session, name):
+              pass
+        tests: |
+          def _run(name):
+              engine = create_engine("sqlite://")
+              _fill(engine)
+              session = sessionmaker(bind=engine, expire_on_commit=False)()
+              res = find_by_genre(session, name)
+              session.close()
+              return res or []
+
+          def test_jazz():
+              """find_by_genre('jazz') renvoie les 3 albums triés par titre"""
+              assert [a.title for a in _run("jazz")] == ["Blue Train", "Giant Steps", "Kind of Blue"]
+
+          def test_modal():
+              """find_by_genre('MODAL') renvoie Kind of Blue (insensible à la casse)"""
+              assert [a.title for a in _run("MODAL")] == ["Kind of Blue"]
+
+          def test_artiste_charge():
+              """l'artiste est lisible après close (joinedload)"""
+              a = _run("Hard bop")[0]
+              try:
+                  assert a.artist.name == "John Coltrane"
+              except Exception as e:
+                  raise AssertionError(f"{type(e).__name__} : charge Album.artist avec joinedload")
+        solution: |
+          def find_by_genre(session, name):
+              return (
+                  session.query(Album)
+                  .options(joinedload(Album.artist))
+                  .join(Album.genres)
+                  .filter(Genre.name.ilike(name))
+                  .order_by(Album.title)
+                  .all()
+              )
+        indices: ["`.join(Album.genres)` avant de filtrer sur `Genre.name`."]
+
+  - id: "2.9"
+    palier: 3
+    title: "Mixins, héritage multiple, MRO, @property et super()"
+    memo: |
+      - Un **mixin** est une classe secondaire, jamais instanciée seule, qui apporte des méthodes réutilisables par héritage multiple. On parle d'« héritage partiel ».
+      - `class Actor(Base, BaseModelMixin)` : l'**ordre compte**. Le **MRO** (algorithme C3) cherche les méthodes de gauche à droite (`Actor.__mro__`).
+      - `BaseModelMixin.to_dict()` parcourt `self.__table__.columns`. `__getitem__` lève `KeyError` si l'attribut n'existe pas.
+      - `@property` : une méthode qui se lit comme un attribut (`movie.average_rating`, sans parenthèses).
+      - `@staticmethod` : une méthode sans `self`, rangée dans la classe pour l'organisation.
+      - Surcharge : `Movie.__getitem__` traite le cas `'genres'` puis délègue le reste à `super().__getitem__(item)`.
+    example: |
+      class BaseModelMixin:
+          """mixin : jamais instancié, pas de __init__"""
+          def __getitem__(self, item):
+              if hasattr(self, item):
+                  return getattr(self, item)
+              raise KeyError(f"L'objet '{self.__class__.__name__}' n'a pas l'attribut '{item}'")
+
+          def to_dict(self):
+              result = {}
+              for col in self.__table__.columns:
+                  val = getattr(self, col.name)
+                  if isinstance(val, datetime):
+                      val = val.strftime("%Y-%m-%d %H:%M:%S")
+                  result[col.name] = val
+              return result
+
+      class Movie(Base, BaseModelMixin):
+          @property
+          def average_rating(self):                       # movie.average_rating
+              if not self.reviews:
+                  return None
+              return round(sum(r.rating for r in self.reviews) / len(self.reviews), 1)
+
+          def __getitem__(self, item):                    # surcharge
+              if item == "genres":
+                  return ", ".join(g.name for g in self.genres)
+              return super().__getitem__(item)            # cas général : le mixin
+    exercises:
+      - type: qcm
+        tags: [mro, mixin]
+        enonce: "`class A: def hello(self): return 'A'`, `class B: def hello(self): return 'B'`, `class C(B, A): pass`. Que renvoie `C().hello()` ?"
+        choices: ["`'B'`", "`'A'`", "Une erreur d'ambiguïté", "`None`"]
+        answer: 0
+        explication: "Le MRO parcourt les parents de gauche à droite : C → B → A. C'est la méthode de B qui est trouvée en premier."
+      - type: trous
+        tags: [super, mixin]
+        enonce: "Complète la surcharge de `__getitem__` dans `Superhero`."
+        code: |
+          def __getitem__(self, item):
+              if item == "powers":
+                  return self.powers_str
+              return [[0]].__getitem__([[1]])
+        blanks:
+          - ["super()"]
+          - ["item"]
+      - type: bug
+        tags: [super, mixin]
+        enonce: "`movie['title']` plante avec `NameError`. Corrige la surcharge."
+        code: |
+          class Movie(Base, BaseModelMixin):
+              __tablename__ = 'movies'
+              id = Column(Integer, primary_key=True)
+              title = Column(String(255), nullable=False)
+
+              def __getitem__(self, item):
+                  if item == "genres":
+                      return ", ".join(g.name for g in self.genres)
+                  return __getitem__(item)
+        fixes:
+          9: ["return super().__getitem__(item)", "return BaseModelMixin.__getitem__(self, item)"]
+        explication: "Pour appeler la méthode du parent (ici le mixin), on passe par `super()`."
+      - type: bug
+        tags: [mixin]
+        enonce: "`to_dict()` renvoie des clés bizarres (des objets `Column`) au lieu des noms de colonnes."
+        code: |
+          class BaseModelMixin:
+              def __getitem__(self, item):
+                  if hasattr(self, item):
+                      return getattr(self, item)
+                  raise KeyError(f"pas d'attribut {item}")
+
+              def to_dict(self):
+                  result = {}
+                  for col in self.__table__.columns:
+                      result[col] = getattr(self, col.name)
+                  return result
+        fixes:
+          10: ["result[col.name] = getattr(self, col.name)"]
+      - type: code
+        tags: [mixin]
+        enonce: |
+          Écris le mixin `BaseModelMixin` du TD02, sans constructeur :
+          - `__getitem__(item)` renvoie l'attribut, ou lève `KeyError` s'il n'existe pas ;
+          - `to_dict()` renvoie `{nom_colonne: valeur}` pour chaque colonne de `self.__table__.columns`, et formate les `datetime` en `"%Y-%m-%d %H:%M:%S"`.
+          Le modèle de test `Review(Base, BaseModelMixin)` est déclaré **après** ton code.
+        starter: |
+          from datetime import datetime
+
+
+          class BaseModelMixin:
+              pass
+        tests: |
+          from datetime import datetime
+          from sqlalchemy import Column, Integer, String, DateTime
+          from sqlalchemy.orm import declarative_base
+          _Base = declarative_base()
+
+          class Review(_Base, BaseModelMixin):
+              __tablename__ = "reviews"
+              id = Column(Integer, primary_key=True)
+              comment = Column(String(100))
+              created_at = Column(DateTime)
+
+          def test_getitem():
+              """review['comment'] renvoie l'attribut"""
+              assert Review(id=1, comment="top")["comment"] == "top"
+
+          def test_keyerror():
+              """review['inconnu'] lève KeyError"""
+              try:
+                  Review()["inconnu"]
+              except KeyError:
+                  return
+              except Exception as e:
+                  raise AssertionError(f"il faut lever KeyError, pas {type(e).__name__}")
+              raise AssertionError("aucune erreur levée")
+
+          def test_to_dict():
+              """to_dict() renvoie les 3 colonnes, avec la date formatée"""
+              r = Review(id=1, comment="top", created_at=datetime(2026, 1, 15, 9, 30, 0))
+              assert r.to_dict() == {"id": 1, "comment": "top", "created_at": "2026-01-15 09:30:00"}, f"obtenu {r.to_dict()}"
+
+          def test_pas_de_init():
+              """le mixin ne définit pas de __init__"""
+              assert "__init__" not in BaseModelMixin.__dict__
+        solution: |
+          from datetime import datetime
+
+
+          class BaseModelMixin:
+              """mixin pour les modèles ORM : accès dictionnaire + sérialisation"""
+
+              def __getitem__(self, item):
+                  if hasattr(self, item):
+                      return getattr(self, item)
+                  raise KeyError(f"L'objet '{self.__class__.__name__}' n'a pas l'attribut '{item}'")
+
+              def to_dict(self):
+                  result = {}
+                  for col in self.__table__.columns:
+                      val = getattr(self, col.name)
+                      if isinstance(val, datetime):
+                          val = val.strftime("%Y-%m-%d %H:%M:%S")
+                      result[col.name] = val
+                  return result
+        indices: ["`col.name` donne le nom de la colonne, et `getattr(self, col.name)` sa valeur."]
+      - type: code
+        tags: [property, mixin, mro]
+        enonce: |
+          Écris le mixin `HeroStatsMixin`, qui sera utilisé par `class Superhero(HeroStatsMixin)`. On suppose que l'objet a une liste `self.missions`, dont chaque mission a `danger_level` (1 à 5) et `status`.
+          - `@property average_danger` : la moyenne des `danger_level` arrondie à 1 décimale, ou `None` s'il n'y a pas de mission ;
+          - `@property completed_missions_count` : le nombre de missions au statut `"Completed"` ;
+          - `@staticmethod danger_label(level)` : `"faible"` si le niveau vaut 2 ou moins, `"moyen"` s'il vaut 3, `"élevé"` au-delà.
+        starter: |
+          class HeroStatsMixin:
+              pass
+        tests: |
+          class _M:
+              def __init__(self, d, s):
+                  self.danger_level, self.status = d, s
+
+          class Superhero(HeroStatsMixin):
+              def __init__(self, missions):
+                  self.missions = missions
+
+          def test_moyenne():
+              """average_danger (sans parenthèses) vaut 3.3"""
+              h = Superhero([_M(3, "Completed"), _M(5, "Completed"), _M(2, "En cours")])
+              assert h.average_danger == 3.3, f"obtenu {h.average_danger!r} (as-tu mis @property ?)"
+
+          def test_moyenne_vide():
+              """sans mission, average_danger vaut None"""
+              assert Superhero([]).average_danger is None
+
+          def test_completed():
+              """completed_missions_count compte les missions 'Completed'"""
+              h = Superhero([_M(3, "Completed"), _M(5, "Completed"), _M(2, "En cours")])
+              assert h.completed_missions_count == 2
+
+          def test_static():
+              """danger_label est une méthode statique (appelable sur la classe)"""
+              assert HeroStatsMixin.danger_label(1) == "faible" and HeroStatsMixin.danger_label(3) == "moyen" and HeroStatsMixin.danger_label(5) == "élevé"
+        solution: |
+          class HeroStatsMixin:
+              """statistiques réutilisables pour tout objet qui possède des missions"""
+
+              @property
+              def average_danger(self):
+                  if not self.missions:
+                      return None
+                  return round(sum(m.danger_level for m in self.missions) / len(self.missions), 1)
+
+              @property
+              def completed_missions_count(self):
+                  return len([m for m in self.missions if m.status == "Completed"])
+
+              @staticmethod
+              def danger_label(level):
+                  if level <= 2:
+                      return "faible"
+                  if level == 3:
+                      return "moyen"
+                  return "élevé"
+        indices: ["`@property` au-dessus de `def average_danger(self):`, et `@staticmethod` au-dessus de `def danger_label(level):`, sans `self`."]
+
+  # ===================================================================== PALIER 4
+  - id: "2.10"
+    palier: 4
+    title: "Sujet papier A : bibliothèque en ORM"
+    memo: |
+      **Sujet.** Traduis ce schéma SQL en modèles SQLAlchemy (approche déclarative, `Base` + `BaseModelMixin`) :
+      - `authors(id PK, name VARCHAR(150) NOT NULL UNIQUE, country VARCHAR(100))`
+      - `books(id PK, title VARCHAR(255) NOT NULL, year INTEGER, author_id INTEGER REFERENCES authors(id) ON DELETE SET NULL)`
+      - `book_details(id PK, book_id INTEGER NOT NULL UNIQUE REFERENCES books(id) ON DELETE CASCADE, pages INTEGER, isbn VARCHAR(20))`
+      - `tags(id PK, name VARCHAR(50) NOT NULL UNIQUE)`
+      - `book_tags(book_id REFERENCES books(id) ON DELETE CASCADE, tag_id REFERENCES tags(id) ON DELETE CASCADE, PRIMARY KEY(book_id, tag_id))`
+      - Les relations sont : auteur 1-N livres, livre 1-1 détail, livre N-N tags.
+    exercises:
+      - type: papier
+        tags: [declarative-base, mixin, engine]
+        enonce: "Écris `app/models/base.py` : `Base`, le mixin `BaseModelMixin` (`__getitem__` et `to_dict`) et `get_engine(db_uri=None)`, qui renvoie un moteur SQLAlchemy (`sqlite:///library.db` par défaut)."
+        duree: 420
+        tests: |
+          def test_base():
+              """Base est une base déclarative (elle a metadata)"""
+              assert hasattr(Base, "metadata"), "Base = declarative_base()"
+
+          def test_mixin():
+              """BaseModelMixin a __getitem__ et to_dict, mais pas de __init__"""
+              assert callable(getattr(BaseModelMixin, "__getitem__", None)) and callable(getattr(BaseModelMixin, "to_dict", None))
+              assert "__init__" not in BaseModelMixin.__dict__
+
+          def test_engine():
+              """get_engine('sqlite://') renvoie un moteur SQLAlchemy"""
+              from sqlalchemy.engine import Engine
+              e = get_engine("sqlite://")
+              assert isinstance(e, Engine) and str(e.url) == "sqlite://"
+
+          def test_to_dict():
+              """to_dict() d'un modèle renvoie ses colonnes"""
+              from sqlalchemy import Column, Integer, String
+              class _T(Base, BaseModelMixin):
+                  __tablename__ = "t_test"
+                  id = Column(Integer, primary_key=True)
+                  name = Column(String(10))
+              assert _T(id=1, name="x").to_dict() == {"id": 1, "name": "x"}
+              assert _T(name="y")["name"] == "y"
+        grille:
+          - {critere: "`Base = declarative_base()` (import depuis `sqlalchemy.orm`)", points: 1, auto: test_base}
+          - {critere: "`BaseModelMixin.__getitem__` : `getattr` si `hasattr`, sinon `raise KeyError`", points: 1, auto: test_to_dict}
+          - {critere: "`to_dict()` : boucle sur `self.__table__.columns`, clé `col.name`", points: 1.5, auto: test_to_dict}
+          - {critere: "Pas de `__init__` dans le mixin", points: 0.5, auto: test_mixin}
+          - {critere: "`get_engine` : URI par défaut puis `return create_engine(db_uri, echo=False)`", points: 1, auto: test_engine}
+        solution: |
+          import os
+          from datetime import datetime
+          from sqlalchemy import create_engine
+          from sqlalchemy.orm import declarative_base
+
+          Base = declarative_base()
+
+
+          class BaseModelMixin:
+              """mixin : accès type dictionnaire + sérialisation (jamais instancié)"""
+
+              def __getitem__(self, item):
+                  if hasattr(self, item):
+                      return getattr(self, item)
+                  raise KeyError(f"L'objet '{self.__class__.__name__}' n'a pas l'attribut '{item}'")
+
+              def to_dict(self):
+                  result = {}
+                  for col in self.__table__.columns:
+                      val = getattr(self, col.name)
+                      if isinstance(val, datetime):
+                          val = val.strftime("%Y-%m-%d %H:%M:%S")
+                      result[col.name] = val
+                  return result
+
+
+          def get_engine(db_uri=None):
+              if db_uri is None:
+                  db_uri = "sqlite:///library.db"
+              return create_engine(db_uri, echo=False)
+      - type: papier
+        tags: [association-table, relation-NN, ondelete]
+        enonce: "Écris `app/models/associations.py`, avec la table d'association `book_tags`."
+        duree: 240
+        setup: |
+          from sqlalchemy.orm import declarative_base
+          Base = declarative_base()
+          class BaseModelMixin:
+              pass
+          fake_module("app.models.base", Base=Base, BaseModelMixin=BaseModelMixin)
+        tests: |
+          def test_table():
+              """book_tags est une Table liée à Base.metadata"""
+              assert book_tags.name == "book_tags", "Table('book_tags', ...)"
+              assert book_tags.metadata is Base.metadata, "2e argument : Base.metadata (importée de app.models.base)"
+
+          def test_cles():
+              """book_id et tag_id forment la clé primaire"""
+              assert {c.name for c in book_tags.primary_key.columns} == {"book_id", "tag_id"}
+
+          def test_fk():
+              """FK vers books.id et tags.id, en ondelete CASCADE"""
+              targets = {list(c.foreign_keys)[0].target_fullname: list(c.foreign_keys)[0].ondelete for c in book_tags.columns}
+              assert targets == {"books.id": "CASCADE", "tags.id": "CASCADE"}, f"obtenu {targets}"
+        grille:
+          - {critere: "`from app.models.base import Base` + imports `Table`, `Column`, `Integer`, `ForeignKey`", points: 1}
+          - {critere: "`Table('book_tags', Base.metadata, ...)`", points: 1, auto: test_table}
+          - {critere: "Deux colonnes avec `primary_key=True`", points: 1, auto: test_cles}
+          - {critere: "`ForeignKey('books.id', ondelete='CASCADE')` et `ForeignKey('tags.id', ondelete='CASCADE')`", points: 1.5, auto: test_fk}
+        solution: |
+          from sqlalchemy import Table, Column, Integer, ForeignKey
+          from app.models.base import Base
+
+          # N-N entre Book et Tag
+          book_tags = Table(
+              'book_tags',
+              Base.metadata,
+              Column('book_id', Integer, ForeignKey('books.id', ondelete='CASCADE'), primary_key=True),
+              Column('tag_id', Integer, ForeignKey('tags.id', ondelete='CASCADE'), primary_key=True)
+          )
+      - type: papier
+        tags: [tablename, column-options, relation-1N, mro]
+        enonce: "Écris `app/models/Author.py` : la classe `Author` et sa relation 1-N vers `Book` (attribut `books`, lié à `Book.author`)."
+        duree: 300
+        setup: |
+          from sqlalchemy import Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import declarative_base, relationship
+          Base = declarative_base()
+          class BaseModelMixin:
+              pass
+          fake_module("app.models.base", Base=Base, BaseModelMixin=BaseModelMixin)
+          class Book(Base):
+              __tablename__ = "books"
+              id = Column(Integer, primary_key=True)
+              author_id = Column(Integer, ForeignKey("authors.id", ondelete="SET NULL"))
+              author = relationship("Author", back_populates="books")
+        tests: |
+          from sqlalchemy import inspect
+
+          def test_table():
+              """__tablename__ = 'authors' et héritage (Base, BaseModelMixin) dans cet ordre"""
+              assert Author.__tablename__ == "authors"
+              assert Author.__bases__ == (Base, BaseModelMixin), f"bases : {Author.__bases__}"
+
+          def test_colonnes():
+              """name obligatoire et unique, country facultatif"""
+              c = Author.__table__.c
+              assert c.name.nullable is False and c.name.unique, "name : unique=True, nullable=False"
+              assert c.country.nullable is not False
+
+          def test_relation():
+              """books = relationship('Book', back_populates='author')"""
+              rel = inspect(Author).relationships
+              assert "books" in rel and rel["books"].back_populates == "author" and rel["books"].uselist
+        grille:
+          - {critere: "`class Author(Base, BaseModelMixin)` (dans cet ordre)", points: 1, auto: test_table}
+          - {critere: "`__tablename__ = 'authors'` et `id` clé primaire", points: 1, auto: test_table}
+          - {critere: "`name = Column(String(150), unique=True, nullable=False)`, plus `country`", points: 1, auto: test_colonnes}
+          - {critere: "`books = relationship('Book', back_populates='author')`", points: 1.5, auto: test_relation}
+          - {critere: "Constructeur avec des valeurs par défaut (facultatif mais attendu)", points: 0.5}
+        solution: |
+          from sqlalchemy import Column, Integer, String
+          from sqlalchemy.orm import relationship
+          from app.models.base import Base, BaseModelMixin
+
+
+          class Author(Base, BaseModelMixin):
+              """auteur ; 1-N avec Book"""
+              __tablename__ = 'authors'
+
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              name = Column(String(150), unique=True, nullable=False, index=True)
+              country = Column(String(100), nullable=True)
+
+              books = relationship('Book', back_populates='author')
+
+              def __init__(self, name=None, country=None):
+                  self.name = name
+                  self.country = country
+      - type: papier
+        tags: [relation-1N, relation-11, relation-NN, cascade, ondelete]
+        enonce: "Écris `app/models/Book.py` : ses colonnes, la FK vers l'auteur, et ses 3 relations (`author`, `detail` en 1-1 avec cascade, `tags` en N-N). `Author`, `BookDetail`, `Tag` et `book_tags` existent déjà."
+        duree: 540
+        setup: |
+          from sqlalchemy import Column, Integer, String, ForeignKey, Table
+          from sqlalchemy.orm import declarative_base, relationship
+          Base = declarative_base()
+          class BaseModelMixin:
+              pass
+          book_tags = Table("book_tags", Base.metadata,
+              Column("book_id", Integer, ForeignKey("books.id", ondelete="CASCADE"), primary_key=True),
+              Column("tag_id", Integer, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True))
+          fake_module("app.models.base", Base=Base, BaseModelMixin=BaseModelMixin)
+          fake_module("app.models.associations", book_tags=book_tags)
+          class Author(Base):
+              __tablename__ = "authors"
+              id = Column(Integer, primary_key=True)
+              name = Column(String(150))
+              books = relationship("Book", back_populates="author")
+          class BookDetail(Base):
+              __tablename__ = "book_details"
+              id = Column(Integer, primary_key=True)
+              book_id = Column(Integer, ForeignKey("books.id", ondelete="CASCADE"), unique=True, nullable=False)
+              pages = Column(Integer)
+              book = relationship("Book", back_populates="detail")
+          class Tag(Base):
+              __tablename__ = "tags"
+              id = Column(Integer, primary_key=True)
+              name = Column(String(50))
+              books = relationship("Book", secondary=book_tags, back_populates="tags")
+        tests: |
+          from sqlalchemy import inspect, create_engine
+          from sqlalchemy.orm import sessionmaker
+
+          def test_colonnes():
+              """books : title obligatoire, author_id FK authors.id SET NULL nullable"""
+              c = Book.__table__.c
+              assert Book.__tablename__ == "books" and c.title.nullable is False
+              fk = list(c.author_id.foreign_keys)[0]
+              assert fk.target_fullname == "authors.id" and fk.ondelete == "SET NULL" and c.author_id.nullable
+
+          def test_author():
+              """author = relationship('Author', back_populates='books')"""
+              assert inspect(Book).relationships["author"].back_populates == "books"
+
+          def test_detail():
+              """detail : 1-1 (uselist=False) avec cascade delete-orphan"""
+              r = inspect(Book).relationships["detail"]
+              assert r.back_populates == "book" and r.uselist is False, "uselist=False"
+              assert r.cascade.delete_orphan, "cascade='all, delete-orphan'"
+
+          def test_tags():
+              """tags : N-N via secondary=book_tags"""
+              r = inspect(Book).relationships["tags"]
+              assert r.secondary is not None and r.secondary.name == "book_tags" and r.back_populates == "books"
+
+          def test_fonctionne():
+              """un livre avec détail et tags s'enregistre, et sa suppression supprime le détail"""
+              e = create_engine("sqlite://")
+              Base.metadata.create_all(e)
+              s = sessionmaker(bind=e)()
+              b = Book(title="Dune")
+              b.detail = BookDetail(pages=412)
+              b.tags = [Tag(name="SF")]
+              s.add(b)
+              s.commit()
+              s.delete(b)
+              s.commit()
+              assert s.query(BookDetail).count() == 0
+        grille:
+          - {critere: "`__tablename__ = 'books'`, `id`, `title` (`nullable=False`), `year`", points: 1, auto: test_colonnes}
+          - {critere: "`author_id = Column(Integer, ForeignKey('authors.id', ondelete='SET NULL'), nullable=True)`", points: 1.5, auto: test_colonnes}
+          - {critere: "`author = relationship('Author', back_populates='books')`", points: 1, auto: test_author}
+          - {critere: "`detail = relationship('BookDetail', back_populates='book', uselist=False, cascade='all, delete-orphan')`", points: 1.5, auto: test_detail}
+          - {critere: "`tags = relationship('Tag', secondary=book_tags, back_populates='books')`", points: 1.5, auto: test_tags}
+          - {critere: "Import de `book_tags` depuis `app.models.associations`", points: 0.5}
+        solution: |
+          from sqlalchemy import Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import relationship
+          from app.models.base import Base, BaseModelMixin
+          from app.models.associations import book_tags
+
+
+          class Book(Base, BaseModelMixin):
+              """livre : N-1 Author, 1-1 BookDetail, N-N Tag"""
+              __tablename__ = 'books'
+
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              title = Column(String(255), nullable=False, index=True)
+              year = Column(Integer, nullable=True)
+              author_id = Column(Integer, ForeignKey('authors.id', ondelete='SET NULL'), nullable=True, index=True)
+
+              author = relationship('Author', back_populates='books')
+              detail = relationship('BookDetail', back_populates='book', uselist=False, cascade='all, delete-orphan')
+              tags = relationship('Tag', secondary=book_tags, back_populates='books')
+      - type: papier
+        tags: [relation-11, relation-NN, column-options]
+        enonce: "Écris `BookDetail` (1-1 inverse vers `Book`) et `Tag` (N-N avec `Book`). `Book` existe déjà, avec `detail` et `tags`."
+        duree: 420
+        setup: |
+          from sqlalchemy import Column, Integer, String, ForeignKey, Table
+          from sqlalchemy.orm import declarative_base, relationship
+          Base = declarative_base()
+          class BaseModelMixin:
+              pass
+          book_tags = Table("book_tags", Base.metadata,
+              Column("book_id", Integer, ForeignKey("books.id", ondelete="CASCADE"), primary_key=True),
+              Column("tag_id", Integer, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True))
+          fake_module("app.models.base", Base=Base, BaseModelMixin=BaseModelMixin)
+          fake_module("app.models.associations", book_tags=book_tags)
+          class Book(Base):
+              __tablename__ = "books"
+              id = Column(Integer, primary_key=True)
+              title = Column(String(255))
+              detail = relationship("BookDetail", back_populates="book", uselist=False, cascade="all, delete-orphan")
+              tags = relationship("Tag", secondary=book_tags, back_populates="books")
+        tests: |
+          from sqlalchemy import inspect
+
+          def test_detail_fk():
+              """book_details.book_id : FK books.id CASCADE, unique, non nul"""
+              c = BookDetail.__table__.c.book_id
+              fk = list(c.foreign_keys)[0]
+              assert BookDetail.__tablename__ == "book_details"
+              assert fk.target_fullname == "books.id" and fk.ondelete == "CASCADE"
+              assert c.unique and c.nullable is False, "unique=True, nullable=False"
+
+          def test_detail_rel():
+              """BookDetail.book = relationship('Book', back_populates='detail')"""
+              assert inspect(BookDetail).relationships["book"].back_populates == "detail"
+
+          def test_tag():
+              """Tag : table tags, name unique, books en N-N"""
+              assert Tag.__tablename__ == "tags" and Tag.__table__.c.name.unique
+              r = inspect(Tag).relationships["books"]
+              assert r.secondary.name == "book_tags" and r.back_populates == "tags"
+        grille:
+          - {critere: "`BookDetail` : `book_id = Column(Integer, ForeignKey('books.id', ondelete='CASCADE'), unique=True, nullable=False)`", points: 1.5, auto: test_detail_fk}
+          - {critere: "`BookDetail` : `pages`, `isbn`, `book = relationship('Book', back_populates='detail')`", points: 1, auto: test_detail_rel}
+          - {critere: "`Tag` : `__tablename__ = 'tags'`, `name` unique et obligatoire", points: 1, auto: test_tag}
+          - {critere: "`Tag.books = relationship('Book', secondary=book_tags, back_populates='tags')`", points: 1.5, auto: test_tag}
+        solution: |
+          from sqlalchemy import Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import relationship
+          from app.models.base import Base, BaseModelMixin
+          from app.models.associations import book_tags
+
+
+          class BookDetail(Base, BaseModelMixin):
+              """fiche technique d'un livre : 1-1 inverse vers Book"""
+              __tablename__ = 'book_details'
+
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              book_id = Column(Integer, ForeignKey('books.id', ondelete='CASCADE'), unique=True, nullable=False, index=True)
+              pages = Column(Integer, nullable=True)
+              isbn = Column(String(20), nullable=True)
+
+              book = relationship('Book', back_populates='detail')
+
+
+          class Tag(Base, BaseModelMixin):
+              """étiquette : N-N avec Book"""
+              __tablename__ = 'tags'
+
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              name = Column(String(50), unique=True, nullable=False, index=True)
+
+              books = relationship('Book', secondary=book_tags, back_populates='tags')
+      - type: papier
+        tags: [back-populates, cascade, ondelete, relation-11]
+        enonce: "Question de cours : explique `back_populates`, `uselist=False`, et la différence entre `ondelete='CASCADE'` et `cascade='all, delete-orphan'`."
+        duree: 360
+        grille:
+          - {critere: "`back_populates` relie les deux côtés d'une relation (nom de l'attribut d'en face), déclaré des deux côtés", points: 1}
+          - {critere: "`uselist=False` : l'attribut renvoie un objet unique (1-1) au lieu d'une liste", points: 1}
+          - {critere: "`ondelete='CASCADE'` : règle de la **base de données** sur la clé étrangère", points: 1}
+          - {critere: "`cascade='all, delete-orphan'` : règle de l'**ORM** sur la relation du parent (suppression via la session, orphelins)", points: 1}
+        solution: |
+          back_populates synchronise les deux côtés d'une relation : chaque relationship donne le nom de
+          l'attribut d'en face (Author.books ↔ Book.author). Il se déclare des deux côtés.
+          uselist=False transforme la collection en objet unique : book.detail est un BookDetail (1-1).
+          ondelete='CASCADE' est une contrainte SQL portée par la clé étrangère : la BASE supprime les lignes
+          filles quand le parent disparaît.
+          cascade='all, delete-orphan' est un comportement de l'ORM, déclaré sur la relationship du parent :
+          session.delete(book) supprime aussi son détail, et un enfant détaché de son parent est supprimé.
+
+  - id: "2.11"
+    palier: 4
+    title: "Sujet papier B : musique, mixin, cascades et @property"
+    memo: |
+      **Sujet.** Le schéma de la base :
+      - `artists(id PK, name VARCHAR(150) NOT NULL UNIQUE, country)`
+      - `albums(id PK, title VARCHAR(255) NOT NULL, year INTEGER, artist_id INTEGER NOT NULL REFERENCES artists(id) ON DELETE CASCADE)`
+      - `tracks(id PK, title, duration INTEGER (en secondes), album_id NOT NULL REFERENCES albums(id) ON DELETE CASCADE)`
+      - `genres(id PK, name UNIQUE)` et la table d'association `album_genres`.
+      - `Base` et `BaseModelMixin` viennent de `app/models/base.py`.
+    exercises:
+      - type: papier
+        tags: [mixin]
+        enonce: "Écris `BaseModelMixin` : `__getitem__` (qui lève `KeyError` si l'attribut est absent) et `to_dict()` (avec les `datetime` formatées en `%Y-%m-%d %H:%M:%S`)."
+        duree: 300
+        tests: |
+          from datetime import datetime
+          from sqlalchemy import Column, Integer, String, DateTime
+          from sqlalchemy.orm import declarative_base
+          _B = declarative_base()
+          class _R(_B, BaseModelMixin):
+              __tablename__ = "r"
+              id = Column(Integer, primary_key=True)
+              name = Column(String(10))
+              at = Column(DateTime)
+
+          def test_getitem():
+              """obj['name'] fonctionne, obj['x'] lève KeyError"""
+              assert _R(name="a")["name"] == "a"
+              try:
+                  _R()["x"]
+                  raise AssertionError("pas de KeyError")
+              except KeyError:
+                  pass
+
+          def test_to_dict():
+              """to_dict formate les datetime"""
+              assert _R(id=1, name="a", at=datetime(2026, 3, 1, 8, 0, 0)).to_dict() == {"id": 1, "name": "a", "at": "2026-03-01 08:00:00"}
+        grille:
+          - {critere: "`__getitem__` : `hasattr` → `getattr`, sinon `raise KeyError(...)`", points: 1.5, auto: test_getitem}
+          - {critere: "`to_dict` : boucle sur `self.__table__.columns` et `result[col.name]`", points: 1.5, auto: test_to_dict}
+          - {critere: "Formatage des `datetime` avec `strftime`", points: 1, auto: test_to_dict}
+          - {critere: "Pas de constructeur (un mixin n'est jamais instancié)", points: 0.5}
+        solution: |
+          from datetime import datetime
+
+
+          class BaseModelMixin:
+              def __getitem__(self, item):
+                  if hasattr(self, item):
+                      return getattr(self, item)
+                  raise KeyError(f"L'objet '{self.__class__.__name__}' n'a pas l'attribut '{item}'")
+
+              def to_dict(self):
+                  result = {}
+                  for col in self.__table__.columns:
+                      val = getattr(self, col.name)
+                      if isinstance(val, datetime):
+                          val = val.strftime("%Y-%m-%d %H:%M:%S")
+                      result[col.name] = val
+                  return result
+      - type: papier
+        tags: [relation-1N, cascade, ondelete]
+        enonce: "Écris `Artist` et `Album` (sans les genres ni les pistes). Supprimer un artiste supprime ses albums, à la fois dans l'ORM et dans la base."
+        duree: 420
+        setup: |
+          from sqlalchemy.orm import declarative_base
+          Base = declarative_base()
+          class BaseModelMixin:
+              pass
+          fake_module("app.models.base", Base=Base, BaseModelMixin=BaseModelMixin)
+        tests: |
+          from sqlalchemy import inspect, create_engine
+          from sqlalchemy.orm import sessionmaker
+
+          def test_fk():
+              """albums.artist_id : FK artists.id CASCADE, non nul"""
+              c = Album.__table__.c.artist_id
+              fk = list(c.foreign_keys)[0]
+              assert fk.target_fullname == "artists.id" and fk.ondelete == "CASCADE" and c.nullable is False
+
+          def test_relations():
+              """Artist.albums (cascade delete-orphan) ↔ Album.artist"""
+              r = inspect(Artist).relationships["albums"]
+              assert r.back_populates == "artist" and r.cascade.delete_orphan
+              assert inspect(Album).relationships["artist"].back_populates == "albums"
+
+          def test_suppression():
+              """supprimer l'artiste supprime ses albums"""
+              e = create_engine("sqlite://")
+              Base.metadata.create_all(e)
+              s = sessionmaker(bind=e)()
+              a = Artist(name="Daft Punk")
+              a.albums = [Album(title="Discovery", year=2001), Album(title="Homework", year=1997)]
+              s.add(a)
+              s.commit()
+              s.delete(a)
+              s.commit()
+              assert s.query(Album).count() == 0
+        grille:
+          - {critere: "`Artist` : `__tablename__ = 'artists'`, `name` unique et obligatoire", points: 1}
+          - {critere: "`albums = relationship('Album', back_populates='artist', cascade='all, delete-orphan')`", points: 1.5, auto: test_relations}
+          - {critere: "`artist_id = Column(Integer, ForeignKey('artists.id', ondelete='CASCADE'), nullable=False)`", points: 1.5, auto: test_fk}
+          - {critere: "`artist = relationship('Artist', back_populates='albums')`", points: 1, auto: test_suppression}
+        solution: |
+          from sqlalchemy import Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import relationship
+          from app.models.base import Base, BaseModelMixin
+
+
+          class Artist(Base, BaseModelMixin):
+              __tablename__ = 'artists'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              name = Column(String(150), unique=True, nullable=False, index=True)
+              country = Column(String(100), nullable=True)
+              albums = relationship('Album', back_populates='artist', cascade='all, delete-orphan')
+
+
+          class Album(Base, BaseModelMixin):
+              __tablename__ = 'albums'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              title = Column(String(255), nullable=False)
+              year = Column(Integer, nullable=True)
+              artist_id = Column(Integer, ForeignKey('artists.id', ondelete='CASCADE'), nullable=False, index=True)
+              artist = relationship('Artist', back_populates='albums')
+      - type: papier
+        tags: [property, relation-1N]
+        enonce: "Écris `Track`, puis `Album` avec la relation `tracks` et deux `@property` : `tracks_count` et `duration_total` (la somme des durées, 0 s'il n'y a pas de piste). La classe `Artist` existe déjà."
+        duree: 420
+        setup: |
+          from sqlalchemy import Column, Integer, String
+          from sqlalchemy.orm import declarative_base, relationship
+          Base = declarative_base()
+          class BaseModelMixin:
+              pass
+          fake_module("app.models.base", Base=Base, BaseModelMixin=BaseModelMixin)
+          class Artist(Base):
+              __tablename__ = "artists"
+              id = Column(Integer, primary_key=True)
+              name = Column(String(150))
+              albums = relationship("Album", back_populates="artist")
+        tests: |
+          from sqlalchemy import inspect
+
+          def test_track():
+              """tracks.album_id : FK albums.id ; Track.album ↔ Album.tracks"""
+              fk = list(Track.__table__.c.album_id.foreign_keys)[0]
+              assert fk.target_fullname == "albums.id"
+              assert inspect(Track).relationships["album"].back_populates == "tracks"
+
+          def test_properties():
+              """tracks_count et duration_total sont des propriétés"""
+              a = Album(title="Discovery")
+              a.tracks = [Track(title="One More Time", duration=320), Track(title="Aerodynamic", duration=212)]
+              assert a.tracks_count == 2, "a.tracks_count sans parenthèses : @property"
+              assert a.duration_total == 532
+
+          def test_vide():
+              """duration_total vaut 0 sans piste"""
+              assert Album(title="x").duration_total == 0
+        grille:
+          - {critere: "`Track` : `album_id` FK `albums.id` (`ondelete='CASCADE'`, `nullable=False`) + `album = relationship(...)`", points: 1.5, auto: test_track}
+          - {critere: "`Album.tracks = relationship('Track', back_populates='album', cascade='all, delete-orphan')`", points: 1, auto: test_track}
+          - {critere: "`@property tracks_count` → `len(self.tracks)`", points: 1, auto: test_properties}
+          - {critere: "`@property duration_total` → `sum(t.duration for t in self.tracks)` (0 si vide)", points: 1, auto: test_vide}
+        solution: |
+          from sqlalchemy import Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import relationship
+          from app.models.base import Base, BaseModelMixin
+
+
+          class Album(Base, BaseModelMixin):
+              __tablename__ = 'albums'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              title = Column(String(255), nullable=False)
+              year = Column(Integer)
+              artist_id = Column(Integer, ForeignKey('artists.id', ondelete='CASCADE'))
+              artist = relationship('Artist', back_populates='albums')
+              tracks = relationship('Track', back_populates='album', cascade='all, delete-orphan')
+
+              @property
+              def tracks_count(self):
+                  return len(self.tracks)
+
+              @property
+              def duration_total(self):
+                  return sum(t.duration or 0 for t in self.tracks)
+
+
+          class Track(Base, BaseModelMixin):
+              __tablename__ = 'tracks'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              title = Column(String(255))
+              duration = Column(Integer, default=0)
+              album_id = Column(Integer, ForeignKey('albums.id', ondelete='CASCADE'), nullable=False)
+              album = relationship('Album', back_populates='tracks')
+      - type: papier
+        tags: [super, relation-NN, mixin]
+        enonce: "Écris `Album` avec sa relation N-N `genres` (table `album_genres` fournie) et une surcharge de `__getitem__`, pour que `album['genres']` renvoie `\"Jazz, Modal\"`. Les autres clés passent par le mixin. `Genre` existe déjà."
+        duree: 360
+        setup: |
+          from sqlalchemy import Column, Integer, String, ForeignKey, Table
+          from sqlalchemy.orm import declarative_base, relationship
+          Base = declarative_base()
+          class BaseModelMixin:
+              def __getitem__(self, item):
+                  if hasattr(self, item):
+                      return getattr(self, item)
+                  raise KeyError(item)
+          album_genres = Table("album_genres", Base.metadata,
+              Column("album_id", Integer, ForeignKey("albums.id", ondelete="CASCADE"), primary_key=True),
+              Column("genre_id", Integer, ForeignKey("genres.id", ondelete="CASCADE"), primary_key=True))
+          fake_module("app.models.base", Base=Base, BaseModelMixin=BaseModelMixin)
+          fake_module("app.models.associations", album_genres=album_genres)
+          class Genre(Base):
+              __tablename__ = "genres"
+              id = Column(Integer, primary_key=True)
+              name = Column(String(100))
+              albums = relationship("Album", secondary=album_genres, back_populates="genres")
+        tests: |
+          from sqlalchemy import inspect
+
+          def test_relation():
+              """genres = relationship('Genre', secondary=album_genres, back_populates='albums')"""
+              r = inspect(Album).relationships["genres"]
+              assert r.secondary.name == "album_genres" and r.back_populates == "albums"
+
+          def test_getitem_genres():
+              """album['genres'] renvoie 'Jazz, Modal'"""
+              a = Album(title="Kind of Blue")
+              a.genres = [Genre(name="Jazz"), Genre(name="Modal")]
+              assert a["genres"] == "Jazz, Modal", f"obtenu {a['genres']!r}"
+
+          def test_getitem_autre():
+              """album['title'] passe par le mixin (super)"""
+              assert Album(title="Kind of Blue")["title"] == "Kind of Blue"
+              try:
+                  Album(title="x")["inconnu"]
+                  raise AssertionError("les autres clés doivent passer par super().__getitem__")
+              except KeyError:
+                  pass
+        grille:
+          - {critere: "`genres = relationship('Genre', secondary=album_genres, back_populates='albums')`", points: 1.5, auto: test_relation}
+          - {critere: "`if item == 'genres': return \", \".join(g.name for g in self.genres)`", points: 1.5, auto: test_getitem_genres}
+          - {critere: "`return super().__getitem__(item)` pour les autres clés", points: 1.5, auto: test_getitem_autre}
+        solution: |
+          from sqlalchemy import Column, Integer, String
+          from sqlalchemy.orm import relationship
+          from app.models.base import Base, BaseModelMixin
+          from app.models.associations import album_genres
+
+
+          class Album(Base, BaseModelMixin):
+              __tablename__ = 'albums'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              title = Column(String(255), nullable=False)
+              genres = relationship('Genre', secondary=album_genres, back_populates='albums')
+
+              def __getitem__(self, item):
+                  """polymorphisme par surcharge : album['genres'] renvoie une chaîne"""
+                  if item == "genres":
+                      return ", ".join(g.name for g in self.genres)
+                  return super().__getitem__(item)
+      - type: papier
+        tags: [mro, mixin]
+        enonce: "Question de cours : qu'est-ce qu'un mixin ? Pourquoi `class Album(Base, BaseModelMixin)` dans cet ordre ? Qu'est-ce que le MRO ?"
+        duree: 300
+        grille:
+          - {critere: "Un mixin est une classe secondaire, jamais instanciée, qui apporte des méthodes réutilisables", points: 1}
+          - {critere: "C'est un des rares cas d'héritage multiple autorisé (« héritage partiel »), sans hiérarchie rigide", points: 1}
+          - {critere: "Le MRO (algorithme C3) fixe l'ordre de recherche des méthodes : de gauche à droite", points: 1}
+          - {critere: "L'ordre (Base, BaseModelMixin) suit la consigne du TD, et c'est le 1er parent qui l'emporte en cas de conflit", points: 1}
+        solution: |
+          Un mixin est une classe secondaire qui n'est jamais instanciée seule (pas de __init__). Elle injecte
+          des comportements transversaux (to_dict, __getitem__, horodatage…) dans plusieurs classes, par
+          héritage multiple, sans créer de hiérarchie rigide : c'est un « héritage partiel ».
+          Le MRO (Method Resolution Order, algorithme C3) détermine l'ordre de recherche des attributs et des
+          méthodes : Python parcourt les parents de gauche à droite (Album → Base → … → BaseModelMixin).
+          En cas de méthode portant le même nom, c'est celle du premier parent listé qui est utilisée :
+          l'ordre (Base, BaseModelMixin) demandé dans le TD est donc important.
+      - type: papier
+        tags: [session-orm, commit, create-all]
+        enonce: "Écris `remplir(engine)` : elle crée les tables, ouvre une session, ajoute l'artiste « Daft Punk » et ses albums « Discovery » (2001) et « Homework » (1997) avec `add_all`, puis valide et ferme la session. Les modèles `Artist` et `Album` sont fournis."
+        duree: 300
+        setup: |
+          from sqlalchemy import Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+          Base = declarative_base()
+          class Artist(Base):
+              __tablename__ = "artists"
+              id = Column(Integer, primary_key=True)
+              name = Column(String(150), unique=True, nullable=False)
+              albums = relationship("Album", back_populates="artist", cascade="all, delete-orphan")
+          class Album(Base):
+              __tablename__ = "albums"
+              id = Column(Integer, primary_key=True)
+              title = Column(String(255), nullable=False)
+              year = Column(Integer)
+              artist_id = Column(Integer, ForeignKey("artists.id", ondelete="CASCADE"), nullable=False)
+              artist = relationship("Artist", back_populates="albums")
+        tests: |
+          from sqlalchemy import create_engine
+
+          def test_remplir():
+              """remplir(engine) crée 1 artiste et 2 albums"""
+              e = create_engine("sqlite://")
+              remplir(e)
+              s = sessionmaker(bind=e)()
+              assert s.query(Artist).count() == 1, "un seul artiste attendu"
+              assert sorted(a.title for a in s.query(Album).all()) == ["Discovery", "Homework"]
+        grille:
+          - {critere: "`Base.metadata.create_all(engine)`", points: 1, auto: test_remplir}
+          - {critere: "`Session = sessionmaker(bind=engine)` puis `session = Session()`", points: 1}
+          - {critere: "Création des objets et `session.add_all([...])`", points: 1, auto: test_remplir}
+          - {critere: "`session.commit()` puis `session.close()`", points: 1.5}
+        solution: |
+          def remplir(engine):
+              Base.metadata.create_all(engine)
+              Session = sessionmaker(bind=engine)
+              session = Session()
+              dp = Artist(name="Daft Punk")
+              albums = [Album(title="Discovery", year=2001, artist=dp), Album(title="Homework", year=1997, artist=dp)]
+              session.add_all([dp] + albums)
+              session.commit()
+              session.close()
+
+  - id: "2.12"
+    palier: 4
+    title: "Sujet papier C : le DAO ORM AlbumSqliteORM"
+    memo: |
+      **Sujet.** Les modèles `Artist`, `Album`, `Genre` et `Track` existent (dans `app/models/`). `Album.artist` est en N-1, `Album.genres` en N-N et `Album.tracks` en 1-N.
+      - Tu écris le DAO `AlbumSqliteORM(AlbumDAOInterface)` sur le modèle du `MovieSqliteORM` du TD02.
+      - Chaque méthode ouvre une session et la ferme dans un `finally`.
+    exercises:
+      - type: papier
+        tags: [dao-orm, engine, session-orm]
+        enonce: "Écris l'en-tête du DAO : les imports, `__init__(self, db_uri)` (avec `self.engine` et `self.SessionFactory`, `expire_on_commit=False`) et `connect()`."
+        duree: 300
+        setup: *music_models
+        tests: |
+          def test_engine():
+              """dao.engine est un moteur SQLAlchemy"""
+              from sqlalchemy.engine import Engine
+              assert isinstance(AlbumSqliteORM("sqlite://").engine, Engine)
+
+          def test_connect():
+              """connect() renvoie une session avec expire_on_commit=False"""
+              from sqlalchemy.orm import Session as _S
+              s = AlbumSqliteORM("sqlite://").connect()
+              assert isinstance(s, _S), "connect() doit renvoyer self.SessionFactory()"
+              assert s.expire_on_commit is False, "sessionmaker(bind=self.engine, expire_on_commit=False)"
+              s.close()
+        grille:
+          - {critere: "Imports de `sessionmaker`, `joinedload`, `selectinload` et des modèles", points: 1}
+          - {critere: "`self.engine = create_engine(db_uri)` (ou `get_engine`)", points: 1, auto: test_engine}
+          - {critere: "`self.SessionFactory = sessionmaker(bind=self.engine, expire_on_commit=False)`", points: 1.5, auto: test_connect}
+          - {critere: "`def connect(self): return self.SessionFactory()`", points: 1, auto: test_connect}
+        solution: |
+          from sqlalchemy import create_engine
+          from sqlalchemy.orm import sessionmaker, joinedload, selectinload
+          from app.models.AlbumDAOInterface import AlbumDAOInterface
+          from app.models.Album import Album
+          from app.models.Genre import Genre
+          from app.models.Artist import Artist
+
+
+          class AlbumSqliteORM(AlbumDAOInterface):
+              """DAO des albums utilisant l'ORM"""
+
+              def __init__(self, db_uri="sqlite:///music.db"):
+                  self.engine = create_engine(db_uri, echo=False)
+                  self.SessionFactory = sessionmaker(bind=self.engine, expire_on_commit=False)
+
+              def connect(self):
+                  """retourne une nouvelle session ORM"""
+                  return self.SessionFactory()
+      - type: papier
+        tags: [loading, dao-orm]
+        enonce: "Écris `_query_with_relations(self, session)`, avec le chargement anticipé adapté à chaque relation. Recopie `__init__` et `connect`."
+        duree: 300
+        setup: *music_models
+        tests: |
+          def _albums():
+              dao = AlbumSqliteORM("sqlite://")
+              _fill(dao.engine)
+              s = dao.connect()
+              res = dao._query_with_relations(s).order_by(Album.id).all()
+              s.close()
+              return res
+
+          def test_to_one():
+              """album.artist lisible après close (joinedload)"""
+              try:
+                  assert _albums()[0].artist.name == "Miles Davis"
+              except Exception as e:
+                  raise AssertionError(f"{type(e).__name__} sur artist")
+
+          def test_to_many():
+              """album.genres et album.tracks lisibles après close (selectinload)"""
+              try:
+                  a = _albums()[0]
+                  assert len(a.genres) == 2 and len(a.tracks) == 2
+              except Exception as e:
+                  raise AssertionError(f"{type(e).__name__} sur genres/tracks")
+        grille:
+          - {critere: "`return session.query(Album).options(...)`", points: 1}
+          - {critere: "`joinedload(Album.artist)` (to-one)", points: 1.5, auto: test_to_one}
+          - {critere: "`selectinload(Album.genres)` et `selectinload(Album.tracks)` (to-many)", points: 1.5, auto: test_to_many}
+        solution: |
+          class AlbumSqliteORM(AlbumDAOInterface):
+              def __init__(self, db_uri="sqlite:///music.db"):
+                  self.engine = create_engine(db_uri, echo=False)
+                  self.SessionFactory = sessionmaker(bind=self.engine, expire_on_commit=False)
+
+              def connect(self):
+                  return self.SessionFactory()
+
+              def _query_with_relations(self, session):
+                  """requête de base : relations chargées d'avance (pas de N+1)"""
+                  return session.query(Album).options(
+                      joinedload(Album.artist),
+                      selectinload(Album.genres),
+                      selectinload(Album.tracks)
+                  )
+      - type: papier
+        tags: [dao-orm, try-finally, query]
+        enonce: "Écris `findAll(limit=None)` (triés par titre) et `findById(id)` (qui renvoie `[album]` ou `[]`), avec `try / finally`. Recopie ce dont tu as besoin."
+        duree: 360
+        setup: *music_models
+        tests: |
+          def _dao():
+              dao = AlbumSqliteORM("sqlite://")
+              _fill(dao.engine)
+              return dao
+
+          def test_findAll():
+              """findAll() trié par titre, findAll(2) limité"""
+              dao = _dao()
+              assert [a.title for a in dao.findAll()] == ["Blue Train", "Giant Steps", "Kind of Blue"]
+              assert len(dao.findAll(limit=2)) == 2
+
+          def test_findById():
+              """findById(1) renvoie [Kind of Blue], findById(99) renvoie []"""
+              dao = _dao()
+              res = dao.findById(1)
+              assert isinstance(res, list) and len(res) == 1 and res[0].title == "Kind of Blue"
+              assert dao.findById(99) == []
+        grille:
+          - {critere: "`session = self.connect()` puis `try: ... finally: session.close()`", points: 1.5}
+          - {critere: "`findAll` : `order_by(Album.title)` puis `.limit(limit)` si `limit` est donné", points: 1.5, auto: test_findAll}
+          - {critere: "`findById` : `filter(Album.id == id).first()` puis `[album] if album else []`", points: 1.5, auto: test_findById}
+        solution: |
+          class AlbumSqliteORM(AlbumDAOInterface):
+              def __init__(self, db_uri="sqlite:///music.db"):
+                  self.engine = create_engine(db_uri, echo=False)
+                  self.SessionFactory = sessionmaker(bind=self.engine, expire_on_commit=False)
+
+              def connect(self):
+                  return self.SessionFactory()
+
+              def _query_with_relations(self, session):
+                  return session.query(Album).options(
+                      joinedload(Album.artist), selectinload(Album.genres), selectinload(Album.tracks)
+                  )
+
+              def findAll(self, limit=None):
+                  session = self.connect()
+                  try:
+                      query = self._query_with_relations(session).order_by(Album.title)
+                      if limit is not None:
+                          query = query.limit(limit)
+                      return query.all()
+                  finally:
+                      session.close()
+
+              def findById(self, id):
+                  session = self.connect()
+                  try:
+                      album = self._query_with_relations(session).filter(Album.id == id).first()
+                      return [album] if album else []
+                  finally:
+                      session.close()
+      - type: papier
+        tags: [join, ilike, dao-orm]
+        enonce: "Écris la méthode `findByGenre(genre_name)` du DAO (le reste de la classe est supposé écrit), qui fait une jointure sur les genres avec une comparaison insensible à la casse."
+        duree: 300
+        setup: *music_models
+        tests: |
+          def _dao():
+              cls = globals().get("AlbumSqliteORM") or type("AlbumSqliteORM", (_DAOBase,), {"findByGenre": globals()["findByGenre"]})
+              dao = cls("sqlite://")
+              _fill(dao.engine)
+              return dao
+
+          def test_genre():
+              """findByGenre('modal') renvoie Kind of Blue"""
+              assert [a.title for a in _dao().findByGenre("modal")] == ["Kind of Blue"]
+
+          def test_jazz():
+              """findByGenre('Jazz') renvoie 3 albums"""
+              assert len(_dao().findByGenre("Jazz")) == 3
+        grille:
+          - {critere: "`.join(Album.genres)`", points: 1.5, auto: test_genre}
+          - {critere: "`.filter(Genre.name.ilike(genre_name))`", points: 1.5, auto: test_jazz}
+          - {critere: "Session fermée dans `finally`", points: 1}
+        solution: |
+          def findByGenre(self, genre_name):
+              session = self.connect()
+              try:
+                  return (
+                      self._query_with_relations(session)
+                      .join(Album.genres)
+                      .filter(Genre.name.ilike(genre_name))
+                      .all()
+                  )
+              finally:
+                  session.close()
+        explication: "Sur ta copie, la méthode seule suffit : `__init__`, `connect` et `_query_with_relations` sont supposés écrits."
+      - type: papier
+        tags: [join, ilike, dao-orm]
+        enonce: "Écris la méthode `findByArtist(name)` du DAO : les albums dont l'artiste **contient** `name` (avec `ilike` et des `%`), triés par année."
+        duree: 300
+        setup: *music_models
+        tests: |
+          def test_artist():
+              """findByArtist('coltrane') renvoie 2 albums triés par année"""
+              cls = globals().get("AlbumSqliteORM") or type("AlbumSqliteORM", (_DAOBase,), {"findByArtist": globals()["findByArtist"]})
+              dao = cls("sqlite://")
+              _fill(dao.engine)
+              assert [a.title for a in dao.findByArtist("coltrane")] == ["Blue Train", "Giant Steps"]
+        grille:
+          - {critere: "`.join(Album.artist)`", points: 1.5, auto: test_artist}
+          - {critere: "`.filter(Artist.name.ilike(f\"%{name}%\"))`", points: 1.5, auto: test_artist}
+          - {critere: "`.order_by(Album.year)` et `try / finally`", points: 1}
+        solution: |
+          def findByArtist(self, name):
+              session = self.connect()
+              try:
+                  return (
+                      self._query_with_relations(session)
+                      .join(Album.artist)
+                      .filter(Artist.name.ilike(f"%{name}%"))
+                      .order_by(Album.year)
+                      .all()
+                  )
+              finally:
+                  session.close()
+      - type: papier
+        tags: [loading, n-plus-1, session-orm]
+        enonce: "Question de cours : qu'est-ce que le problème N+1 ? Quand utiliser `joinedload` plutôt que `selectinload` ? À quoi sert `expire_on_commit=False` ?"
+        duree: 360
+        grille:
+          - {critere: "N+1 : en lazy loading, 1 requête pour la liste plus 1 requête par objet pour chaque relation", points: 1}
+          - {critere: "`joinedload` : une seule requête avec LEFT OUTER JOIN, adaptée aux relations to-one (N-1, 1-1)", points: 1}
+          - {critere: "`selectinload` : une requête secondaire avec IN, adaptée aux collections (1-N, N-N), sans duplication", points: 1}
+          - {critere: "`expire_on_commit=False` : les objets restent lisibles après le commit et la fermeture de la session", points: 1}
+        solution: |
+          En lazy loading (le défaut), chaque relation est chargée au premier accès : afficher N albums et leur
+          artiste coûte 1 requête + N requêtes, c'est le problème N+1.
+          joinedload ajoute un LEFT OUTER JOIN à la requête principale : une seule requête, idéal pour les
+          relations to-one (album.artist, movie.detail).
+          selectinload exécute une seconde requête avec IN (ids des parents) : pas de lignes dupliquées,
+          plus efficace pour les collections (album.genres, album.tracks).
+          expire_on_commit=False empêche SQLAlchemy d'expirer les attributs au commit : les objets renvoyés par
+          le DAO restent utilisables après session.close() (dans le service ou le template).

@@ -1,0 +1,19 @@
+{% extends 'layout.html' %}
+{% block content %}
+<nav aria-label="Fil d'Ariane" class="small mb-2"><a href="{{ url_for('index.index') }}">Accueil</a> / <a href="{{ url_for('progress.dashboard') }}">Progression</a> / Révision</nav>
+<h1 class="fw-bold mb-2" style="letter-spacing: -0.02em;">Réviser mes points faibles</h1>
+{% if exercises %}
+<p class="text-muted-2 mb-4">Série tirée au hasard sur : {% for w in weak %}<span class="tag">{{ w.tag }}</span> {% endfor %}. Ces réponses comptent dans les statistiques, pas dans les étoiles.</p>
+{% with nav = None %}{% include '_runner.html' %}{% endwith %}
+{% else %}
+<div class="card-app p-4">
+	<p class="mb-2">Pas encore de point faible détecté : fais quelques leçons, puis reviens ici.</p>
+	<a class="btn btn-primary" href="{{ url_for('sessions.session_view', session_id=1) }}">Commencer la session 1</a>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/lesson.js') }}"></script>
+<script type="module" src="{{ url_for('static', filename='js/editor.js') }}"></script>
+{% endblock %}

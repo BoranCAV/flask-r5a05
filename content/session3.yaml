@@ -1,0 +1,2529 @@
+session:
+  id: 3
+  title: "Tout assembler"
+  subtitle: "D'un schéma SQL inconnu à l'application complète : modèles, DAO ORM, service, blueprints filtrés (patron super-héros)."
+  palier_names:
+    5: "Bonus (hors contrôle)"
+
+lessons:
+  # ===================================================================== PALIER 1
+  - id: "3.1"
+    palier: 1
+    title: "Du schéma SQL aux modèles"
+    memo: |
+      - `id INTEGER PRIMARY KEY AUTOINCREMENT` → `Column(Integer, primary_key=True, autoincrement=True)`
+      - `name VARCHAR(100) NOT NULL UNIQUE` → `Column(String(100), nullable=False, unique=True)`
+      - `universe VARCHAR(50) NOT NULL DEFAULT 'Marvel'` → `Column(String(50), nullable=False, default="Marvel")`
+      - `city_id INTEGER REFERENCES cities(id) ON DELETE SET NULL` → `Column(Integer, ForeignKey('cities.id', ondelete='SET NULL'), nullable=True)`
+      - Une table qui ne contient **que 2 FK** et une PK composée est une **table d'association** (N-N) : un objet `Table`, sans classe.
+      - Une FK `UNIQUE` (`hero_id ... NOT NULL UNIQUE`) indique une relation **1-1** (`uselist=False` côté parent).
+      - Une FK simple : N-1 du côté de la FK, 1-N de l'autre côté.
+    example: |
+      # CREATE TABLE superheroes (
+      #     id INTEGER PRIMARY KEY AUTOINCREMENT,
+      #     name VARCHAR(100) NOT NULL,
+      #     universe VARCHAR(50) NOT NULL DEFAULT 'Marvel',
+      #     city_id INTEGER REFERENCES cities(id) ON DELETE SET NULL
+      # )
+      class Superhero(Base, BaseModelMixin):
+          __tablename__ = 'superheroes'
+          id = Column(Integer, primary_key=True, autoincrement=True)
+          name = Column(String(100), nullable=False, index=True)
+          universe = Column(String(50), nullable=False, default="Marvel", index=True)
+          city_id = Column(Integer, ForeignKey('cities.id', ondelete='SET NULL'), nullable=True, index=True)
+
+          city = relationship('City', back_populates='superheroes')                  # N-1
+          detail = relationship('HeroDetail', back_populates='superhero', uselist=False, cascade='all, delete-orphan')  # 1-1
+          powers = relationship('Power', secondary=hero_powers, back_populates='superheroes')                         # N-N
+          missions = relationship('Mission', back_populates='superhero', cascade='all, delete-orphan')                 # 1-N
+    exercises:
+      - type: qcm
+        tags: [schema-to-model, association-table]
+        enonce: "`CREATE TABLE hero_powers (hero_id INTEGER NOT NULL REFERENCES superheroes(id), power_id INTEGER NOT NULL REFERENCES powers(id), PRIMARY KEY (hero_id, power_id))`. Comment la traduire ?"
+        choices: ["Une `Table` d'association (N-N), sans classe", "Une classe `HeroPower(Base)`", "Deux relations 1-N", "Une relation 1-1"]
+        answer: 0
+      - type: qcm
+        tags: [schema-to-model, relation-11]
+        enonce: "`hero_details.hero_id INTEGER NOT NULL UNIQUE REFERENCES superheroes(id)`. Quel type de relation entre un héros et ses détails ?"
+        choices: ["1-1", "1-N", "N-N", "Aucune"]
+        answer: 0
+        explication: "La FK est unique : un héros a au plus une fiche de détails. Côté `Superhero`, on écrit `uselist=False`."
+      - type: trous
+        tags: [schema-to-model, foreign-key, ondelete]
+        enonce: "Traduis `city_id INTEGER REFERENCES cities(id) ON DELETE SET NULL`."
+        code: |
+          city_id = Column(Integer, [[0]]([[1]], ondelete=[[2]]), nullable=True)
+        blanks:
+          - ["ForeignKey"]
+          - ["'cities.id'"]
+          - ["'SET NULL'"]
+      - type: relier
+        tags: [schema-to-model, column-options]
+        enonce: "Relie chaque morceau de SQL à sa traduction SQLAlchemy."
+        pairs:
+          - ["NOT NULL", "nullable=False"]
+          - ["UNIQUE", "unique=True"]
+          - ["DEFAULT 50", "default=50"]
+          - ["REFERENCES teams(id)", "ForeignKey('teams.id')"]
+          - ["VARCHAR(150)", "String(150)"]
+      - type: vf
+        tags: [schema-to-model]
+        enonce: "`alignment VARCHAR(20) DEFAULT 'Hero'` se traduit par `alignment = Column(String(20), default=\"Hero\")`."
+        answer: true
+      - type: ordre
+        tags: [schema-to-model, arborescence]
+        enonce: "Remets dans l'ordre la méthode pour transformer un schéma SQL inconnu en modèles."
+        lines:
+          - "Repérer les tables d'association (2 FK + PK composée)"
+          - "Écrire base.py (Base, BaseModelMixin, get_engine)"
+          - "Écrire associations.py avec les objets Table"
+          - "Écrire un modèle par table restante avec ses colonnes"
+          - "Ajouter les relationship avec back_populates des deux côtés"
+          - "Importer tous les modèles dans models/__init__.py"
+
+  - id: "3.2"
+    palier: 1
+    title: "Organiser un projet complet"
+    memo: |
+      - `models/__init__.py` importe dans l'ordre : `base` → `associations` → les modèles → l'interface du DAO → le DAO, puis expose tout via `__all__`.
+      - Il faut importer **tous** les modèles : `relationship('Mission')` est résolu par son nom, donc la classe doit avoir été chargée.
+      - `services/` contient un service par domaine (`SuperheroService`).
+      - `blueprints/` contient un blueprint par page ou fonctionnalité (`index`, `heroes`, `teams`, `powers`), chacun avec ses templates.
+      - `create_app()` enregistre chaque blueprint avec son `url_prefix` (`/heroes`, `/teams`, `/powers`).
+      - Rappel : un **module** est un fichier `.py`, un **package** est un dossier avec un `__init__.py`.
+    example: |
+      # app/models/__init__.py (TD03)
+      from app.models.base import Base, BaseModelMixin, get_engine
+      from app.models.associations import hero_powers, hero_teams
+      from app.models.City import City
+      from app.models.Power import Power
+      from app.models.Team import Team
+      from app.models.HeroDetail import HeroDetail
+      from app.models.Superhero import Superhero
+      from app.models.Mission import Mission
+      from app.models.SuperheroDAOInterface import SuperheroDAOInterface
+      from app.models.SuperheroDAO import SuperheroSqliteORM
+
+      __all__ = ['Base', 'BaseModelMixin', 'get_engine', 'hero_powers', 'hero_teams', 'City', 'Power',
+                 'Team', 'HeroDetail', 'Superhero', 'Mission', 'SuperheroDAOInterface', 'SuperheroSqliteORM']
+    exercises:
+      - type: ordre
+        tags: [init-all, arborescence]
+        enonce: "Remets dans l'ordre les imports de `app/models/__init__.py`."
+        lines:
+          - "from app.models.base import Base, BaseModelMixin, get_engine"
+          - "from app.models.associations import hero_powers, hero_teams"
+          - "from app.models.Superhero import Superhero"
+          - "from app.models.SuperheroDAOInterface import SuperheroDAOInterface"
+          - "from app.models.SuperheroDAO import SuperheroSqliteORM"
+        explication: "Base d'abord, car tout en dépend. Puis les associations, qui utilisent `Base.metadata`, puis les modèles, et enfin le DAO, qui importe les modèles."
+      - type: qcm
+        tags: [init-all, relation-1N]
+        enonce: "Pourquoi faut-il importer **tous** les modèles (`Mission` compris) dans `models/__init__.py` ?"
+        choices: ["Parce que `relationship('Mission')` est résolu par son nom : la classe doit être chargée", "Pour que Flask trouve les templates", "Parce que `__all__` l'exige", "Ce n'est pas nécessaire"]
+        answer: 0
+      - type: relier
+        tags: [arborescence]
+        enonce: "Relie chaque fichier du TD03 à son contenu."
+        pairs:
+          - ["models/base.py", "Base, BaseModelMixin, get_engine()"]
+          - ["models/associations.py", "Les tables hero_powers et hero_teams"]
+          - ["models/SuperheroDAO.py", "La classe SuperheroSqliteORM"]
+          - ["services/SuperheroService.py", "La logique métier (statistiques, univers…)"]
+          - ["blueprints/heroes/routes.py", "heroes_bp et ses routes filtrées"]
+      - type: trous
+        tags: [register-bp, url-prefix]
+        enonce: "Complète l'enregistrement des blueprints du TD03."
+        code: |
+          app.register_blueprint(index_bp)
+          app.register_blueprint(heroes_bp, [[0]]='/heroes')
+          app.register_blueprint([[1]], url_prefix='/teams')
+          app.register_blueprint(powers_bp, url_prefix=[[2]])
+        blanks:
+          - ["url_prefix"]
+          - ["teams_bp"]
+          - ["'/powers'"]
+      - type: vf
+        tags: [relation-1N]
+        enonce: "Dans `relationship('Mission', ...)`, on peut citer la classe par son nom (une chaîne) même si elle est définie dans un autre fichier, plus loin."
+        answer: true
+        explication: "La chaîne est résolue plus tard, à la configuration des mappers. Il faut seulement que la classe soit importée quelque part (d'où `models/__init__.py`)."
+      - type: qcm
+        tags: [service, mvcs]
+        enonce: "Où placer `getStatsSummary()`, qui compte les héros, les équipes, les pouvoirs et les missions pour la page d'accueil ?"
+        choices: ["Dans `SuperheroService`", "Dans le modèle `Superhero`", "Dans `index/routes.py`", "Dans `base.py`"]
+        answer: 0
+
+  - id: "3.3"
+    palier: 1
+    title: "Des user stories aux routes"
+    memo: |
+      - Une user story : « En tant qu'utilisateur, je veux… ». Pour chaque story, on décide d'une **route**, d'une **méthode HTTP**, des **paramètres** et d'une **méthode de service**.
+      - Une liste filtrable (Marvel / DC) : la même route avec un query param, `/heroes/?universe=Marvel`.
+      - Une fiche détaillée : un paramètre de chemin, `/heroes/<int:hero_id>`.
+      - Un lien vers les héros d'une ville : `/heroes/city/<string:city_name>` (ou `?city=`).
+      - Un tableau de bord d'accueil : `getStatsSummary()` dans le service, appelé par `index_bp`.
+      - L'ordre de travail pour une fonctionnalité : DAO → service → route → template.
+    example: |
+      # « Je veux filtrer en un clic les héros de Marvel, de DC ou tous »
+      @heroes_bp.route('/', methods=['GET'])
+      def heroes():
+          hs = SuperheroService()
+          universe = request.args.get('universe')        # /heroes/?universe=DC
+          if universe:
+              heroes_data = hs.getHeroesByUniverse(universe)
+          else:
+              heroes_data = hs.getAllHeroes()
+          return render_template('heroes_view.html', heroes=heroes_data)
+
+      # « Je veux cliquer sur un héros pour voir sa fiche complète » → /heroes/9
+      @heroes_bp.route('/<int:hero_id>', methods=['GET'])
+      def hero_detail(hero_id):
+          hero_data = SuperheroService().getHeroById(hero_id)
+          return render_template('hero_detail.html', hero=hero_data[0] if hero_data else None)
+    exercises:
+      - type: relier
+        tags: [user-story, route-params, request-args]
+        enonce: "Relie chaque user story à la route qui la réalise."
+        pairs:
+          - ["Voir la fiche complète de Storm", "GET /heroes/9"]
+          - ["Filtrer les héros de DC", "GET /heroes/?universe=DC"]
+          - ["Voir tous les pouvoirs avec leurs héros", "GET /powers/"]
+          - ["Voir les statistiques globales sur l'accueil", "GET /"]
+      - type: qcm
+        tags: [user-story, request-args]
+        enonce: "« Je veux filtrer en un clic entre Marvel, DC ou tous. » Quelle solution le TD03 retient-il ?"
+        choices: ["Un query param sur la liste : `/heroes/?universe=Marvel`", "Une route par univers codée en dur", "Un formulaire POST", "Un blueprint par univers"]
+        answer: 0
+      - type: trous
+        tags: [route-params, user-story]
+        enonce: "Complète la route de la fiche d'un héros."
+        code: |
+          @heroes_bp.route('/[[0]]', methods=['GET'])
+          def hero_detail(hero_id):
+              hero_data = SuperheroService().[[1]](hero_id)
+              hero = hero_data[0] if hero_data else None
+              return render_template('hero_detail.html', hero=hero)
+        blanks:
+          - ["<int:hero_id>"]
+          - ["getHeroById"]
+      - type: ordre
+        tags: [user-story, mvcs]
+        enonce: "Remets dans l'ordre le développement d'une fonctionnalité « voir les héros d'une équipe »."
+        lines:
+          - "Ajouter findByTeam(team_name) dans le DAO (join + ilike)"
+          - "Ajouter getHeroesByTeam(team_name) dans le service"
+          - "Ajouter la route /team/<string:team_name> dans heroes_bp"
+          - "Réutiliser le template heroes_view.html avec les résultats"
+      - type: vf
+        tags: [user-story]
+        enonce: "Une user story décrit d'abord l'implémentation technique (tables, classes) avant le besoin de l'utilisateur."
+        answer: false
+        explication: "Faux : elle part du point de vue de l'utilisateur (« en tant que… je veux… »). La technique en découle."
+      - type: qcm
+        tags: [user-story, service-stats]
+        enonce: "« Je veux voir sur l'accueil le nombre de héros, d'équipes, de pouvoirs et de missions. » Quelle méthode écrire ?"
+        choices: ["`getStatsSummary()` dans le service, qui fait des `.count()`", "Quatre routes distinctes", "Une propriété `@property` sur `Superhero`", "Un calcul dans le template"]
+        answer: 0
+
+  # ===================================================================== PALIER 2
+  - id: "3.4"
+    palier: 2
+    title: "Le DAO ORM complet (patron SuperheroSqliteORM)"
+    memo: |
+      - `__init__(self, db_path=None, db_uri=None)` calcule `self.db_uri`, puis `self.engine = get_engine(self.db_uri)` et `self.SessionFactory = sessionmaker(bind=self.engine, expire_on_commit=False)`.
+      - `connect()` renvoie `self.SessionFactory()`.
+      - `_query_with_relations(session)` regroupe les `joinedload` (city, detail) et les `selectinload` (powers, teams, missions).
+      - Chaque méthode suit le même schéma : `session = self.connect()`, puis `try: return (...)`, puis `finally: session.close()`.
+      - `findById` renvoie `[hero]` ou `[]`. `findByCity` fait `.join(Superhero.city).filter(City.name.ilike(f"%{x}%"))`.
+      - On peut aussi requêter d'autres modèles : `session.query(Team).options(selectinload(Team.superheroes))`.
+    example: |
+      class SuperheroSqliteORM(SuperheroDAOInterface):
+          def __init__(self, db_path=None, db_uri=None):
+              if db_uri is not None:
+                  self.db_uri = db_uri
+              elif db_path is not None:
+                  self.db_uri = f"sqlite:///{db_path}"
+              self.engine = get_engine(self.db_uri)
+              self.SessionFactory = sessionmaker(bind=self.engine, expire_on_commit=False)
+
+          def connect(self):
+              return self.SessionFactory()
+
+          def findByCity(self, city_name):
+              session = self.connect()
+              try:
+                  return (
+                      self._query_with_relations(session)
+                      .join(Superhero.city)
+                      .filter(City.name.ilike(f"%{city_name}%"))
+                      .order_by(Superhero.name)
+                      .all()
+                  )
+              finally:
+                  session.close()
+    exercises:
+      - type: trous
+        tags: [dao-orm, session-orm]
+        enonce: "Complète le constructeur du DAO."
+        code: |
+          self.engine = get_engine(self.db_uri)
+          self.SessionFactory = [[0]](bind=[[1]], expire_on_commit=[[2]])
+        blanks:
+          - ["sessionmaker"]
+          - ["self.engine"]
+          - ["False"]
+      - type: trous
+        tags: [dao-orm, join, ilike]
+        enonce: "Complète `findByTeam`."
+        code: |
+          def findByTeam(self, team_name):
+              session = self.connect()
+              try:
+                  return (
+                      self._query_with_relations(session)
+                      .[[0]](Superhero.teams)
+                      .filter(Team.name.[[1]](f"%{team_name}%"))
+                      .all()
+                  )
+              [[2]]:
+                  session.close()
+        blanks:
+          - ["join"]
+          - ["ilike"]
+          - ["finally"]
+      - type: ordre
+        tags: [dao-orm, try-finally]
+        enonce: "Remets dans l'ordre `findById`."
+        lines:
+          - "def findById(self, id):"
+          - "    session = self.connect()"
+          - "    try:"
+          - "        hero = self._query_with_relations(session).filter(Superhero.id == id).first()"
+          - "        return [hero] if hero else []"
+          - "    finally:"
+          - "        session.close()"
+      - type: ordre
+        tags: [dao-orm, loading]
+        enonce: "Remets dans l'ordre `findAllTeams` (les équipes avec leurs héros chargés)."
+        lines:
+          - "def findAllTeams(self):"
+          - "    session = self.connect()"
+          - "    try:"
+          - "        return session.query(Team).options(selectinload(Team.superheroes)).order_by(Team.name).all()"
+          - "    finally:"
+          - "        session.close()"
+      - type: relier
+        tags: [dao-orm, query]
+        enonce: "Relie chaque méthode du DAO à sa requête."
+        pairs:
+          - ["findByUniverse", "filter(Superhero.universe.ilike(universe))"]
+          - ["findByPower", "join(Superhero.powers).filter(Power.name.ilike(...))"]
+          - ["findById", "filter(Superhero.id == id).first()"]
+          - ["findAll", "order_by(Superhero.name) puis limit(limit) si fourni"]
+      - type: qcm
+        tags: [dao-orm, session-orm]
+        enonce: "Pourquoi `expire_on_commit=False` dans le DAO ?"
+        choices: ["Pour que les objets restent lisibles après la fermeture de la session (dans le service et les templates)", "Pour désactiver les commits", "Pour accélérer les requêtes", "Pour garder la session ouverte en permanence"]
+        answer: 0
+
+  - id: "3.5"
+    palier: 2
+    title: "Le service : statistiques, distinct, count"
+    memo: |
+      - `SuperheroService.__init__(db_path=None, db_uri=None)` lit `current_app.config` si rien n'est fourni (dans un `try / except RuntimeError` hors requête), puis `self.hdao = SuperheroSqliteORM(...)`.
+      - Le service **délègue** au DAO : `getHeroesByCity(city_name)` renvoie `self.hdao.findByCity(city_name)`.
+      - `getUniverses()` : `session.query(Superhero.universe).distinct().order_by(Superhero.universe).all()`, puis `[u[0] for u in ... if u[0]]`.
+      - `getStatsSummary()` renvoie un dictionnaire de `session.query(Modele).count()`.
+      - `.count()` fait le comptage en SQL, alors que `len(query.all())` charge d'abord tous les objets.
+      - Les calculs **par objet** vont dans le modèle (`@property average_danger`), les **agrégats globaux** dans le service.
+    example: |
+      def getStatsSummary(self):
+          """statistiques globales pour le tableau de bord"""
+          session = self.hdao.connect()
+          try:
+              return {
+                  "total_heroes": session.query(Superhero).count(),
+                  "total_teams": session.query(Team).count(),
+                  "total_powers": session.query(Power).count(),
+                  "total_missions": session.query(Mission).count(),
+              }
+          finally:
+              session.close()
+    exercises:
+      - type: trous
+        tags: [service-stats, distinct]
+        enonce: "Complète `getUniverses()`."
+        code: |
+          universes = (
+              session.query(Superhero.[[0]])
+              .[[1]]()
+              .order_by(Superhero.universe)
+              .all()
+          )
+          return [u[0] for u in universes if u[0]]
+        blanks:
+          - ["universe"]
+          - ["distinct"]
+      - type: trous
+        tags: [service-stats, count]
+        enonce: "Complète le comptage des missions."
+        code: |
+          total_missions = session.[[0]](Mission).[[1]]()
+        blanks:
+          - ["query"]
+          - ["count"]
+      - type: qcm
+        tags: [count]
+        enonce: "Pourquoi préférer `session.query(Superhero).count()` à `len(session.query(Superhero).all())` ?"
+        choices: ["`count()` compte en SQL sans charger tous les objets en mémoire", "`len` ne marche pas sur une liste", "`count()` trie les résultats", "Il n'y a aucune différence"]
+        answer: 0
+      - type: ordre
+        tags: [service-stats, try-finally]
+        enonce: "Remets dans l'ordre `getStatsSummary` (version courte)."
+        lines:
+          - "def getStatsSummary(self):"
+          - "    session = self.hdao.connect()"
+          - "    try:"
+          - "        return {\"total_heroes\": session.query(Superhero).count(), \"total_teams\": session.query(Team).count()}"
+          - "    finally:"
+          - "        session.close()"
+      - type: relier
+        tags: [service-stats, property, mvcs]
+        enonce: "Où placer chaque calcul ?"
+        pairs:
+          - ["Danger moyen des missions d'UN héros", "@property average_danger dans le modèle Superhero"]
+          - ["Nombre total de héros en base", "getStatsSummary() dans le service"]
+          - ["Requête des héros d'une ville", "findByCity() dans le DAO"]
+          - ["Choix du filtre selon l'URL", "La route heroes() du blueprint"]
+      - type: vf
+        tags: [service]
+        enonce: "`getHeroesByUniverse(universe)` dans le service peut simplement renvoyer `self.hdao.findByUniverse(universe)`."
+        answer: true
+        explication: "Vrai : le service délègue au DAO quand il n'y a pas de logique supplémentaire."
+
+  - id: "3.6"
+    palier: 2
+    title: "Blueprints avec filtres par query params"
+    memo: |
+      - `heroes()` lit `universe`, `city`, `power` et `team` avec `request.args.get(...)`. Chacun vaut `None` s'il est absent.
+      - Une cascade de `if / elif` choisit la méthode du service. Le premier filtre présent l'emporte (ici `universe`).
+      - Sans filtre : `getAllHeroes()`. Le titre de la page change selon le filtre.
+      - `current_filter={...}` est passé au template pour surligner le filtre actif.
+      - Il existe aussi des routes dédiées : `/city/<string:city_name>`, `/power/<string:power_name>`, `/team/<string:team_name>`.
+      - L'enregistrement se fait avec `app.register_blueprint(heroes_bp, url_prefix='/heroes')`.
+    example: |
+      @heroes_bp.route('/', methods=['GET'])
+      def heroes():
+          hs = SuperheroService(current_app.config['DATABASE_PATH'])
+          universe = request.args.get('universe')
+          city = request.args.get('city')
+          if universe:
+              heroes_data = hs.getHeroesByUniverse(universe)
+              title = f"Héros de {universe}"
+          elif city:
+              heroes_data = hs.getHeroesByCity(city)
+              title = f"Héros à {city}"
+          else:
+              heroes_data = hs.getAllHeroes()
+              title = "Super-Héros"
+          return render_template('heroes_view.html', metadata={"title": title}, heroes=heroes_data,
+                                 current_filter={"universe": universe, "city": city})
+    exercises:
+      - type: trous
+        tags: [filters, request-args]
+        enonce: "Complète la lecture des filtres."
+        code: |
+          universe = request.[[0]].get([[1]])
+          power = request.args.[[2]]('power')
+        blanks:
+          - ["args"]
+          - ["'universe'"]
+          - ["get"]
+      - type: qcm
+        tags: [filters]
+        enonce: "Avec la cascade `if universe: … elif city: …`, que renvoie `/heroes/?universe=DC&city=Gotham` ?"
+        choices: ["Les héros de DC (le filtre `universe` est testé en premier)", "Les héros de Gotham", "Les héros de DC **et** de Gotham", "Une erreur 400"]
+        answer: 0
+        explication: "Le TD03 le dit lui-même : on priorise clairement `universe`. Pour combiner les filtres, il faudrait une autre approche."
+      - type: trous
+        tags: [route-params, filters]
+        enonce: "Complète la route dédiée aux pouvoirs."
+        code: |
+          @heroes_bp.route('/power/[[0]]', methods=['GET'])
+          def heroes_by_power(power_name):
+              heroes_data = SuperheroService().getHeroesByPower(power_name)
+              return render_template('heroes_view.html', heroes=heroes_data, current_filter={"power": power_name})
+        blanks: [["<string:power_name>", "<power_name>"]]
+      - type: ordre
+        tags: [filters, request-args]
+        enonce: "Remets dans l'ordre cette version simplifiée de `heroes()`."
+        lines:
+          - "@heroes_bp.route('/', methods=['GET'])"
+          - "def heroes():"
+          - "    universe = request.args.get('universe')"
+          - "    if universe:"
+          - "        data = SuperheroService().getHeroesByUniverse(universe)"
+          - "    else:"
+          - "        data = SuperheroService().getAllHeroes()"
+          - "    return render_template('heroes_view.html', heroes=data)"
+      - type: relier
+        tags: [filters, route-params, request-args]
+        enonce: "Relie chaque URL à la fonction du blueprint `heroes` qui la traite."
+        pairs:
+          - ["/heroes/?team=X-Men", "heroes() avec le filtre team"]
+          - ["/heroes/team/X-Men", "heroes_by_team(team_name)"]
+          - ["/heroes/9", "hero_detail(hero_id)"]
+          - ["/heroes/", "heroes() sans filtre → getAllHeroes()"]
+      - type: qcm
+        tags: [filters, url-for]
+        enonce: "Dans un template, quel `url_for` produit `/heroes/?universe=Marvel` ?"
+        choices: ["`url_for('heroes.heroes', universe='Marvel')`", "`url_for('heroes', universe='Marvel')`", "`url_for('/heroes/?universe=Marvel')`", "`url_for('heroes.universe', name='Marvel')`"]
+        answer: 0
+
+  # ===================================================================== PALIER 3
+  - id: "3.7"
+    palier: 3
+    title: "Débugger une application complète (domaine : école)"
+    memo: |
+      Les erreurs typiques, à reconnaître au premier coup d'œil :
+      - `NoReferencedTableError ... could not find table 'Classe'` : la `ForeignKey` vise le nom de la **classe** au lieu de celui de la **table** (`'classes.id'`).
+      - `back_populates` incohérent (`'class'` d'un côté, `'classe'` de l'autre) : erreur à la configuration des mappers.
+      - Une 404 sur une route qui existe : le blueprint n'est pas enregistré, ou le `url_prefix` est faux (il doit commencer par `/`).
+      - Rien n'est écrit en base : le `commit()` est oublié. Des connexions qui fuient : `session.close` sans parenthèses, ou pas de `finally`.
+      - `DetachedInstanceError` dans le template : la relation n'est pas chargée d'avance, ou `expire_on_commit` est resté à `True`.
+      - Une date de création figée : `default=datetime.utcnow()` au lieu de `default=datetime.utcnow`.
+    example: |
+      # version correcte du DAO d'élèves
+      class StudentSqliteORM(StudentDAOInterface):
+          def __init__(self, db_uri):
+              self.engine = create_engine(db_uri)
+              self.SessionFactory = sessionmaker(bind=self.engine, expire_on_commit=False)
+
+          def connect(self):
+              return self.SessionFactory()                  # une session (avec les parenthèses)
+
+          def findByClasse(self, classe_name):
+              session = self.connect()
+              try:
+                  return (session.query(Student)
+                          .options(joinedload(Student.classe))
+                          .join(Student.classe)
+                          .filter(Classe.name == classe_name)
+                          .all())
+              finally:
+                  session.close()                           # avec les parenthèses
+    exercises:
+      - type: qcm
+        tags: [debug, foreign-key]
+        enonce: "Au démarrage : `NoReferencedTableError: Foreign key associated with column 'students.classe_id' could not find table 'Classe'`. Quelle est la cause ?"
+        choices: ["`ForeignKey('Classe.id')` au lieu de `ForeignKey('classes.id')`", "Il manque `back_populates`", "Le blueprint n'est pas enregistré", "Il manque `create_all`"]
+        answer: 0
+      - type: qcm
+        tags: [debug, register-bp]
+        enonce: "La route `@students_bp.route('/')` existe, mais `GET /students/` renvoie 404. Quelles causes sont possibles ?"
+        choices: ["`register_blueprint` oublié", "`url_prefix` mal écrit (par exemple `'students'` sans `/`)", "`commit()` oublié", "`expire_on_commit=False`"]
+        answer: [0, 1]
+      - type: bug
+        tags: [debug, back-populates, foreign-key]
+        enonce: "Ces deux modèles contiennent **2 erreurs**."
+        code: |
+          class Classe(Base, BaseModelMixin):
+              __tablename__ = 'classes'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(50), unique=True, nullable=False)
+              students = relationship('Student', back_populates='class')
+
+          class Student(Base, BaseModelMixin):
+              __tablename__ = 'students'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(100), nullable=False)
+              classe_id = Column(Integer, ForeignKey('Classe.id'))
+              classe = relationship('Classe', back_populates='students')
+        fixes:
+          5: ["students = relationship('Student', back_populates='classe')"]
+          11: ["classe_id = Column(Integer, ForeignKey('classes.id'))", "classe_id = Column(Integer, ForeignKey('classes.id', ondelete='SET NULL'))", "classe_id = Column(Integer, ForeignKey('classes.id', ondelete='SET NULL'), nullable=True)"]
+      - type: bug
+        tags: [debug, url-prefix, route-params]
+        enonce: "La factory et le blueprint contiennent **2 erreurs** : `/students/3` ne répond pas comme prévu."
+        code: |
+          def create_app():
+              app = Flask(__name__)
+              from app.blueprints import students_bp
+              app.register_blueprint(students_bp, url_prefix='students')
+              return app
+
+          students_bp = Blueprint('students', __name__)
+
+          @students_bp.route('/<student_id>', methods=['GET'])
+          def student_view(student_id):
+              student = StudentService().getStudentById(student_id)
+              return jsonify(student[0])
+        fixes:
+          4: ["app.register_blueprint(students_bp, url_prefix='/students')"]
+          9: ["@students_bp.route('/<int:student_id>', methods=['GET'])"]
+        explication: "Le préfixe d'URL commence par `/`, et un identifiant numérique passe par le convertisseur `<int:...>`."
+      - type: code
+        tags: [debug, dao-orm, loading, try-finally]
+        enonce: |
+          Ce DAO d'élèves est truffé d'erreurs (syntaxe, sessions, jointure, chargement). **Corrige-le** pour que :
+          - `findByClasse(nom)` renvoie les élèves de la classe, avec `eleve.classe.name` lisible après la fermeture de la session ;
+          - `findById(id)` renvoie `[eleve]` ou `[]` ;
+          - chaque session soit fermée.
+          Les modèles `Classe` et `Student` sont fournis.
+        setup: &school_models |
+          from sqlalchemy import Column, Integer, String, Float, ForeignKey, create_engine
+          from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+          Base = declarative_base()
+          class Classe(Base):
+              __tablename__ = 'classes'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(50), unique=True, nullable=False)
+              students = relationship('Student', back_populates='classe')
+          class Student(Base):
+              __tablename__ = 'students'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(100), nullable=False)
+              classe_id = Column(Integer, ForeignKey('classes.id', ondelete='SET NULL'), nullable=True)
+              classe = relationship('Classe', back_populates='students')
+          def _fill(engine):
+              Base.metadata.create_all(engine)
+              s = sessionmaker(bind=engine)()
+              a, b = Classe(name='BUT3-A'), Classe(name='BUT3-B')
+              s.add_all([Student(name='Lina', classe=a), Student(name='Sami', classe=a), Student(name='Hugo', classe=b)])
+              s.commit()
+              s.close()
+        starter: |
+          from sqlalchemy import create_engine
+          from sqlalchemy.orm import sessionmaker, joinedload
+
+
+          class StudentSqliteORM:
+              def __init__(self, db_uri="sqlite://"):
+                  self.engine = create_engine(db_uri)
+                  self.SessionFactory = sessionmaker(bind=self.engine)
+
+              def connect(self):
+                  return self.SessionFactory
+
+              def findByClasse(self, classe_name):
+                  session = self.connect()
+                  try:
+                      return session.query(Student).filter(Classe.name == classe_name).all()
+                  finally:
+                      session.close
+
+              def findById(self, id):
+                  session = self.connect()
+                  return session.query(Student).filter(Student.id = id).first()
+        tests: |
+          def _dao():
+              dao = StudentSqliteORM("sqlite://")
+              _fill(dao.engine)
+              return dao
+
+          def test_par_classe():
+              """findByClasse('BUT3-A') renvoie Lina et Sami"""
+              res = _dao().findByClasse("BUT3-A")
+              assert sorted(s.name for s in res) == ["Lina", "Sami"], f"obtenu {[s.name for s in res]} (jointure manquante ?)"
+
+          def test_classe_apres_close():
+              """eleve.classe.name est lisible après la fermeture de la session"""
+              res = _dao().findByClasse("BUT3-B")
+              try:
+                  assert res[0].classe.name == "BUT3-B"
+              except AssertionError:
+                  raise
+              except Exception as e:
+                  raise AssertionError(f"{type(e).__name__} : expire_on_commit=False et joinedload(Student.classe)")
+
+          def test_by_id():
+              """findById(1) renvoie [Lina], findById(99) renvoie []"""
+              dao = _dao()
+              res = dao.findById(1)
+              assert isinstance(res, list) and len(res) == 1 and res[0].name == "Lina", f"obtenu {res!r}"
+              assert dao.findById(99) == []
+        solution: |
+          from sqlalchemy import create_engine
+          from sqlalchemy.orm import sessionmaker, joinedload
+
+
+          class StudentSqliteORM:
+              def __init__(self, db_uri="sqlite://"):
+                  self.engine = create_engine(db_uri)
+                  self.SessionFactory = sessionmaker(bind=self.engine, expire_on_commit=False)
+
+              def connect(self):
+                  return self.SessionFactory()
+
+              def findByClasse(self, classe_name):
+                  session = self.connect()
+                  try:
+                      return (
+                          session.query(Student)
+                          .options(joinedload(Student.classe))
+                          .join(Student.classe)
+                          .filter(Classe.name == classe_name)
+                          .all()
+                      )
+                  finally:
+                      session.close()
+
+              def findById(self, id):
+                  session = self.connect()
+                  try:
+                      student = session.query(Student).filter(Student.id == id).first()
+                      return [student] if student else []
+                  finally:
+                      session.close()
+        indices:
+          - "Commence par l'erreur de syntaxe : `=` au lieu de `==` dans un `filter`."
+          - "`connect()` doit renvoyer une session, c'est-à-dire `self.SessionFactory()` avec les parenthèses."
+          - "Pour filtrer sur `Classe.name`, il faut `.join(Student.classe)`."
+      - type: code
+        tags: [debug, foreign-key, back-populates, default-callable, relation-NN]
+        enonce: |
+          Ces modèles (école : classes, élèves, matières, notes) ne démarrent pas. **Corrige-les** sans changer les noms des tables ni des attributs :
+          - `Grade` est en N-1 vers `Student` (attribut `student` ↔ `Student.grades`) et vers `Subject` (`subject` ↔ `Subject.grades`) ;
+          - `Grade.created_at` doit être calculée à chaque insertion ;
+          - la suppression d'un élève supprime ses notes.
+        starter: |
+          from datetime import datetime
+          from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey
+          from sqlalchemy.orm import declarative_base, relationship
+
+          Base = declarative_base()
+
+
+          class Student(Base):
+              __tablename__ = 'students'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(100), nullable=False)
+              grades = relationship('Grade', back_populates='students')
+
+
+          class Subject(Base):
+              __tablename__ = 'subjects'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(100), unique=True, nullable=False)
+              grades = relationship('Grade', back_populates='subject')
+
+
+          class Grade(Base):
+              __tablename__ = 'grades'
+              id = Column(Integer, primary_key=True)
+              value = Column(Float, nullable=False)
+              student_id = Column(Integer, ForeignKey('Student.id', ondelete='CASCADE'), nullable=False)
+              subject_id = Column(Integer, ForeignKey('subjects.id'), nullable=False)
+              created_at = Column(DateTime, default=datetime.now())
+              student = relationship('Student', back_populates='grades')
+              subject = relationship('Subject', back_populates='grade')
+        tests: |
+          import time
+          from sqlalchemy import inspect, create_engine
+          from sqlalchemy.orm import sessionmaker
+
+          def test_mappers():
+              """les relations sont cohérentes (back_populates)"""
+              try:
+                  rs = inspect(Student).relationships
+                  assert rs["grades"].back_populates == "student", "Student.grades doit pointer vers 'student'"
+                  assert inspect(Grade).relationships["subject"].back_populates == "grades"
+              except AssertionError:
+                  raise
+              except Exception as e:
+                  raise AssertionError(f"{type(e).__name__} : {e}"[:200])
+
+          def test_fk():
+              """grades.student_id vise la table students"""
+              fk = list(Grade.__table__.c.student_id.foreign_keys)[0]
+              assert fk.target_fullname == "students.id"
+
+          def test_default():
+              """created_at est un callable (évalué à chaque insertion)"""
+              d = Grade.__table__.c.created_at.default
+              assert d is not None and d.is_callable, "default=datetime.now (sans parenthèses)"
+
+          def test_cascade():
+              """supprimer un élève supprime ses notes"""
+              e = create_engine("sqlite://")
+              Base.metadata.create_all(e)
+              s = sessionmaker(bind=e)()
+              st, sub = Student(name="Lina"), Subject(name="Maths")
+              st.grades = [Grade(value=15, subject=sub), Grade(value=12, subject=sub)]
+              s.add(st)
+              s.commit()
+              s.delete(st)
+              s.commit()
+              assert s.query(Grade).count() == 0, "cascade='all, delete-orphan' sur Student.grades"
+        solution: |
+          from datetime import datetime
+          from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey
+          from sqlalchemy.orm import declarative_base, relationship
+
+          Base = declarative_base()
+
+
+          class Student(Base):
+              __tablename__ = 'students'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(100), nullable=False)
+              grades = relationship('Grade', back_populates='student', cascade='all, delete-orphan')
+
+
+          class Subject(Base):
+              __tablename__ = 'subjects'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(100), unique=True, nullable=False)
+              grades = relationship('Grade', back_populates='subject')
+
+
+          class Grade(Base):
+              __tablename__ = 'grades'
+              id = Column(Integer, primary_key=True)
+              value = Column(Float, nullable=False)
+              student_id = Column(Integer, ForeignKey('students.id', ondelete='CASCADE'), nullable=False)
+              subject_id = Column(Integer, ForeignKey('subjects.id'), nullable=False)
+              created_at = Column(DateTime, default=datetime.now)
+              student = relationship('Student', back_populates='grades')
+              subject = relationship('Subject', back_populates='grades')
+        indices:
+          - "Il y a 5 erreurs : 2 `back_populates`, 1 `ForeignKey`, 1 `default`, et 1 cascade manquante."
+          - "`back_populates` donne le nom de l'attribut **de l'autre classe**."
+
+  - id: "3.8"
+    palier: 3
+    title: "Écrire les modèles depuis un schéma inconnu"
+    memo: |
+      La méthode pour un schéma inconnu, sur le modèle du TD03 :
+      - Lister les tables. Les tables à 2 FK avec une PK composée deviennent des `Table` dans `associations.py`.
+      - Pour chaque autre table : `class X(Base, BaseModelMixin)`, `__tablename__`, puis les colonnes avec leurs options (`nullable`, `unique`, `default`).
+      - Pour chaque FK : une `ForeignKey('table.id', ondelete=...)` du côté de la FK, puis une `relationship` **des deux côtés**, avec `back_populates`.
+      - Une FK `UNIQUE` donne une relation 1-1 : `uselist=False` côté parent, et en général `cascade='all, delete-orphan'`.
+      - Une FK `ON DELETE CASCADE` justifie une `cascade='all, delete-orphan'` sur la relation du parent.
+      - Ajouter les `@property` utiles aux templates (`powers_str`, `average_danger`…).
+    example: |
+      # CREATE TABLE missions (
+      #     id INTEGER PRIMARY KEY AUTOINCREMENT,
+      #     hero_id INTEGER NOT NULL REFERENCES superheroes(id) ON DELETE CASCADE,
+      #     title VARCHAR(150) NOT NULL,
+      #     danger_level INTEGER DEFAULT 3,
+      #     status VARCHAR(50) DEFAULT 'Completed'
+      # )
+      class Mission(Base, BaseModelMixin):
+          __tablename__ = 'missions'
+          id = Column(Integer, primary_key=True, autoincrement=True)
+          hero_id = Column(Integer, ForeignKey('superheroes.id', ondelete='CASCADE'), nullable=False, index=True)
+          title = Column(String(150), nullable=False)
+          danger_level = Column(Integer, default=3)
+          status = Column(String(50), default="Completed")
+          superhero = relationship('Superhero', back_populates='missions')
+    exercises:
+      - type: qcm
+        tags: [schema-to-model, cascade]
+        enonce: "`concerts.artist_id INTEGER NOT NULL REFERENCES artists(id) ON DELETE CASCADE`. Quelle relation déclarer côté `Artist` ?"
+        choices:
+          - "`concerts = relationship('Concert', back_populates='artist', cascade='all, delete-orphan')`"
+          - "`concert = relationship('Concert', uselist=False)`"
+          - "`concerts = relationship('Concert', secondary=artist_concerts)`"
+          - "Aucune relation n'est nécessaire"
+        answer: 0
+      - type: trous
+        tags: [schema-to-model, column-options]
+        enonce: "Traduis `capacity INTEGER NOT NULL DEFAULT 1000`."
+        code: |
+          capacity = Column([[0]], nullable=[[1]], default=[[2]])
+        blanks:
+          - ["Integer"]
+          - ["False"]
+          - ["1000"]
+      - type: bug
+        tags: [schema-to-model, relation-11]
+        enonce: "Le schéma dit `book_details.book_id INTEGER NOT NULL UNIQUE REFERENCES books(id) ON DELETE CASCADE`. `book.detail` renvoie une liste au lieu d'un objet. Corrige le côté `Book`."
+        code: |
+          class Book(Base, BaseModelMixin):
+              __tablename__ = 'books'
+              id = Column(Integer, primary_key=True)
+              title = Column(String(255), nullable=False)
+              detail = relationship('BookDetail', back_populates='book', cascade='all, delete-orphan')
+        fixes:
+          5: ["detail = relationship('BookDetail', back_populates='book', uselist=False, cascade='all, delete-orphan')"]
+      - type: bug
+        tags: [schema-to-model, association-table]
+        enonce: "La table d'association du festival (`artist_genres`, avec une PK composée) contient **2 erreurs**."
+        code: |
+          artist_genres = Table(
+              'artist_genres',
+              Base,
+              Column('artist_id', Integer, ForeignKey('artists.id', ondelete='CASCADE'), primary_key=True),
+              Column('genre_id', Integer, ForeignKey('genres.id', ondelete='CASCADE'))
+          )
+        fixes:
+          3: ["Base.metadata,"]
+          5: ["Column('genre_id', Integer, ForeignKey('genres.id', ondelete='CASCADE'), primary_key=True)"]
+      - type: code
+        tags: [schema-to-model, relation-1N, ondelete]
+        enonce: |
+          Festival de musique. Écris les modèles qui correspondent à ce schéma (`Base` est fournie) :
+          - `stages(id PK, name VARCHAR(100) NOT NULL UNIQUE, capacity INTEGER NOT NULL DEFAULT 1000)`
+          - `artists(id PK, name VARCHAR(150) NOT NULL UNIQUE)`
+          - `concerts(id PK, artist_id INTEGER NOT NULL REFERENCES artists(id) ON DELETE CASCADE, stage_id INTEGER REFERENCES stages(id) ON DELETE SET NULL, day INTEGER NOT NULL, start_hour INTEGER)`
+          Les relations : `Artist.concerts` ↔ `Concert.artist` (avec cascade) et `Stage.concerts` ↔ `Concert.stage`.
+        setup: |
+          from sqlalchemy.orm import declarative_base
+          Base = declarative_base()
+        starter: |
+          from sqlalchemy import Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import relationship
+
+
+          class Stage(Base):
+              __tablename__ = 'stages'
+
+
+          class Artist(Base):
+              __tablename__ = 'artists'
+
+
+          class Concert(Base):
+              __tablename__ = 'concerts'
+        tests: |
+          from sqlalchemy import inspect, create_engine
+          from sqlalchemy.orm import sessionmaker
+
+          def test_stage():
+              """stages : name unique et obligatoire, capacity défaut 1000 et obligatoire"""
+              c = Stage.__table__.c
+              assert c.name.unique and c.name.nullable is False
+              assert c.capacity.nullable is False and c.capacity.default is not None and c.capacity.default.arg == 1000
+
+          def test_concert_fk():
+              """concerts : artist_id CASCADE non nul, stage_id SET NULL nullable, day obligatoire"""
+              c = Concert.__table__.c
+              fa, fs = list(c.artist_id.foreign_keys)[0], list(c.stage_id.foreign_keys)[0]
+              assert (fa.target_fullname, fa.ondelete, c.artist_id.nullable) == ("artists.id", "CASCADE", False)
+              assert (fs.target_fullname, fs.ondelete) == ("stages.id", "SET NULL") and c.stage_id.nullable
+              assert c.day.nullable is False
+
+          def test_relations():
+              """Artist.concerts (cascade) ↔ Concert.artist ; Stage.concerts ↔ Concert.stage"""
+              ra = inspect(Artist).relationships["concerts"]
+              assert ra.back_populates == "artist" and ra.cascade.delete_orphan
+              assert inspect(Stage).relationships["concerts"].back_populates == "stage"
+              assert inspect(Concert).relationships["stage"].back_populates == "concerts"
+
+          def test_comportement():
+              """supprimer une scène garde le concert (stage_id à None), supprimer l'artiste supprime le concert"""
+              e = create_engine("sqlite://")
+              Base.metadata.create_all(e)
+              s = sessionmaker(bind=e)()
+              st, ar = Stage(name="Grande scène"), Artist(name="Justice")
+              s.add(Concert(artist=ar, stage=st, day=1, start_hour=22))
+              s.commit()
+              s.delete(st)
+              s.commit()
+              assert s.query(Concert).one().stage_id is None
+              s.delete(ar)
+              s.commit()
+              assert s.query(Concert).count() == 0
+        solution: |
+          from sqlalchemy import Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import relationship
+
+
+          class Stage(Base):
+              __tablename__ = 'stages'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              name = Column(String(100), unique=True, nullable=False)
+              capacity = Column(Integer, nullable=False, default=1000)
+              concerts = relationship('Concert', back_populates='stage')
+
+
+          class Artist(Base):
+              __tablename__ = 'artists'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              name = Column(String(150), unique=True, nullable=False)
+              concerts = relationship('Concert', back_populates='artist', cascade='all, delete-orphan')
+
+
+          class Concert(Base):
+              __tablename__ = 'concerts'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              artist_id = Column(Integer, ForeignKey('artists.id', ondelete='CASCADE'), nullable=False)
+              stage_id = Column(Integer, ForeignKey('stages.id', ondelete='SET NULL'), nullable=True)
+              day = Column(Integer, nullable=False)
+              start_hour = Column(Integer)
+              artist = relationship('Artist', back_populates='concerts')
+              stage = relationship('Stage', back_populates='concerts')
+        indices:
+          - "La FK avec `ON DELETE CASCADE` justifie `cascade='all, delete-orphan'` sur `Artist.concerts`."
+          - "Pas de cascade sur `Stage.concerts` : supprimer la scène met `stage_id` à NULL."
+      - type: code
+        tags: [schema-to-model, relation-NN, relation-11, association-table]
+        enonce: |
+          Bibliothèque. Écris `book_tags` (table d'association), puis `Book`, `BookDetail` et `Tag` :
+          - `books(id PK, title VARCHAR(255) NOT NULL, year INTEGER)`
+          - `book_details(id PK, book_id INTEGER NOT NULL UNIQUE REFERENCES books(id) ON DELETE CASCADE, pages INTEGER)`
+          - `tags(id PK, name VARCHAR(50) NOT NULL UNIQUE)`
+          - `book_tags(book_id → books.id CASCADE, tag_id → tags.id CASCADE, PK composée)`
+          Les relations : `Book.detail` (1-1, cascade) ↔ `BookDetail.book`, et `Book.tags` ↔ `Tag.books` (N-N).
+        setup: |
+          from sqlalchemy.orm import declarative_base
+          Base = declarative_base()
+        starter: |
+          from sqlalchemy import Table, Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import relationship
+        tests: |
+          from sqlalchemy import inspect, create_engine
+          from sqlalchemy.orm import sessionmaker
+
+          def test_association():
+              """book_tags : PK composée, FK CASCADE vers books et tags"""
+              assert {c.name for c in book_tags.primary_key.columns} == {"book_id", "tag_id"}
+              assert {list(c.foreign_keys)[0].target_fullname for c in book_tags.columns} == {"books.id", "tags.id"}
+
+          def test_detail():
+              """Book.detail : uselist=False et cascade ; BookDetail.book_id unique"""
+              r = inspect(Book).relationships["detail"]
+              assert r.uselist is False and r.cascade.delete_orphan and r.back_populates == "book"
+              assert BookDetail.__table__.c.book_id.unique
+
+          def test_tags():
+              """Book.tags ↔ Tag.books via secondary=book_tags"""
+              r = inspect(Book).relationships["tags"]
+              assert r.secondary is book_tags and r.back_populates == "books"
+              assert inspect(Tag).relationships["books"].back_populates == "tags"
+
+          def test_insertion():
+              """un livre avec détail et 2 tags s'enregistre"""
+              e = create_engine("sqlite://")
+              Base.metadata.create_all(e)
+              s = sessionmaker(bind=e)()
+              b = Book(title="Dune", year=1965)
+              b.detail = BookDetail(pages=412)
+              b.tags = [Tag(name="SF"), Tag(name="Classique")]
+              s.add(b)
+              s.commit()
+              assert s.query(Tag).count() == 2 and s.query(Book).one().detail.pages == 412
+        solution: |
+          from sqlalchemy import Table, Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import relationship
+
+          book_tags = Table(
+              'book_tags',
+              Base.metadata,
+              Column('book_id', Integer, ForeignKey('books.id', ondelete='CASCADE'), primary_key=True),
+              Column('tag_id', Integer, ForeignKey('tags.id', ondelete='CASCADE'), primary_key=True)
+          )
+
+
+          class Book(Base):
+              __tablename__ = 'books'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              title = Column(String(255), nullable=False)
+              year = Column(Integer)
+              detail = relationship('BookDetail', back_populates='book', uselist=False, cascade='all, delete-orphan')
+              tags = relationship('Tag', secondary=book_tags, back_populates='books')
+
+
+          class BookDetail(Base):
+              __tablename__ = 'book_details'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              book_id = Column(Integer, ForeignKey('books.id', ondelete='CASCADE'), unique=True, nullable=False)
+              pages = Column(Integer)
+              book = relationship('Book', back_populates='detail')
+
+
+          class Tag(Base):
+              __tablename__ = 'tags'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              name = Column(String(50), unique=True, nullable=False)
+              books = relationship('Book', secondary=book_tags, back_populates='tags')
+        indices: ["Écris `book_tags` **avant** les classes qui l'utilisent dans `secondary=`."]
+
+  - id: "3.9"
+    palier: 3
+    title: "DAO, service et blueprint testés (domaine : bibliothèque)"
+    memo: |
+      - DAO : une méthode = une session courte, `try / finally`, et les relations chargées d'avance.
+      - Filtrer sur une relation N-N : `.join(Book.tags).filter(Tag.name.ilike(tag_name))`.
+      - Service : il délègue au DAO et ajoute la logique (années distinctes, statistiques, valeurs par défaut).
+      - Blueprint : il lit les query params, appelle le service et renvoie `jsonify` (API) ou `render_template` (vue).
+      - Tester une app Flask : `app = create_app()` puis `client = app.test_client()`, et enfin `client.get('/books/')` (on vérifie `status_code` et `get_json()`).
+    example: |
+      def findByTag(self, tag_name):
+          session = self.connect()
+          try:
+              return (
+                  self._query_with_relations(session)
+                  .join(Book.tags)
+                  .filter(Tag.name.ilike(tag_name))
+                  .order_by(Book.title)
+                  .all()
+              )
+          finally:
+              session.close()
+
+      # test d'intégration
+      app = create_app()
+      r = app.test_client().get('/books/?tag=SF')
+      assert r.status_code == 200
+    exercises:
+      - type: qcm
+        tags: [factory, dao-orm]
+        enonce: "Quelle ligne permet de tester une route sans lancer de serveur ?"
+        choices: ["`create_app().test_client().get('/books/')`", "`app.run(port=8000)`", "`requests.get('http://localhost:8000/books/')`", "`render_template('books.html')`"]
+        answer: 0
+      - type: trous
+        tags: [join, relation-NN]
+        enonce: "Complète le filtre par tag (relation N-N)."
+        code: |
+          self._query_with_relations(session).[[0]](Book.tags).filter([[1]].name.ilike(tag_name)).all()
+        blanks:
+          - ["join"]
+          - ["Tag"]
+      - type: bug
+        tags: [dao-orm, try-finally]
+        enonce: "Cette méthode laisse des sessions ouvertes et renvoie parfois `[None]`. Il y a **2 erreurs**."
+        code: |
+          def findById(self, id):
+              session = self.connect()
+              try:
+                  book = self._query_with_relations(session).filter(Book.id == id).first()
+                  return [book]
+              except:
+                  session.close()
+        fixes:
+          5: ["return [book] if book else []"]
+          6: ["finally:"]
+      - type: bug
+        tags: [filters, request-args]
+        enonce: "La route ignore toujours le filtre `?tag=SF`. Trouve l'erreur."
+        code: |
+          @books_bp.route('/', methods=['GET'])
+          def books():
+              bs = BookService()
+              tag = request.form.get('tag')
+              data = bs.getBooksByTag(tag) if tag else bs.getAllBooks()
+              return jsonify([b.to_dict() for b in data])
+        fixes:
+          4: ["tag = request.args.get('tag')"]
+        explication: "Les paramètres de l'URL (`?tag=`) sont dans `request.args`. `request.form`, lui, contient le corps d'un POST."
+      - type: code
+        tags: [dao-orm, join, ilike]
+        enonce: |
+          Les modèles `Book` et `Tag` (N-N) et la classe `BookDAOBase` sont fournis. `BookDAOBase` contient `__init__(db_uri)`, `connect()` et `_query_with_relations(session)`.
+          Écris `class BookSqliteORM(BookDAOBase)` avec :
+          - `findByTag(tag_name)` : les livres qui portent ce tag (insensible à la casse), triés par titre ;
+          - `countByTag()` : un dictionnaire `{nom_du_tag: nombre_de_livres}`.
+          Chaque méthode ferme sa session.
+        setup: &library_models |
+          from sqlalchemy import Table, Column, Integer, String, ForeignKey, create_engine, func
+          from sqlalchemy.orm import declarative_base, relationship, sessionmaker, joinedload, selectinload
+          Base = declarative_base()
+          book_tags = Table('book_tags', Base.metadata,
+              Column('book_id', Integer, ForeignKey('books.id', ondelete='CASCADE'), primary_key=True),
+              Column('tag_id', Integer, ForeignKey('tags.id', ondelete='CASCADE'), primary_key=True))
+          class Author(Base):
+              __tablename__ = 'authors'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(150), unique=True, nullable=False)
+              books = relationship('Book', back_populates='author')
+          class Book(Base):
+              __tablename__ = 'books'
+              id = Column(Integer, primary_key=True)
+              title = Column(String(255), nullable=False)
+              year = Column(Integer)
+              author_id = Column(Integer, ForeignKey('authors.id', ondelete='SET NULL'))
+              author = relationship('Author', back_populates='books')
+              tags = relationship('Tag', secondary=book_tags, back_populates='books')
+              def to_dict(self):
+                  return {"id": self.id, "title": self.title, "year": self.year}
+          class Tag(Base):
+              __tablename__ = 'tags'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(50), unique=True, nullable=False)
+              books = relationship('Book', secondary=book_tags, back_populates='tags')
+          def _fill(engine):
+              Base.metadata.create_all(engine)
+              s = sessionmaker(bind=engine)()
+              sf, classique, polar = Tag(name='SF'), Tag(name='Classique'), Tag(name='Polar')
+              herbert, asimov, christie = Author(name='Frank Herbert'), Author(name='Isaac Asimov'), Author(name='Agatha Christie')
+              s.add_all([
+                  Book(title='Dune', year=1965, author=herbert, tags=[sf, classique]),
+                  Book(title='Fondation', year=1951, author=asimov, tags=[sf]),
+                  Book(title='Les Robots', year=1950, author=asimov, tags=[sf]),
+                  Book(title='Le Crime de l\'Orient-Express', year=1934, author=christie, tags=[polar, classique]),
+              ])
+              s.commit()
+              s.close()
+          class BookDAOBase:
+              def __init__(self, db_uri="sqlite://"):
+                  self.engine = create_engine(db_uri)
+                  self.SessionFactory = sessionmaker(bind=self.engine, expire_on_commit=False)
+              def connect(self):
+                  return self.SessionFactory()
+              def _query_with_relations(self, session):
+                  return session.query(Book).options(joinedload(Book.author), selectinload(Book.tags))
+          fake_module("app.models.Book", Book=Book)
+          fake_module("app.models.Tag", Tag=Tag)
+          fake_module("app.models.Author", Author=Author)
+        starter: |
+          class BookSqliteORM(BookDAOBase):
+              def findByTag(self, tag_name):
+                  pass
+
+              def countByTag(self):
+                  pass
+        tests: |
+          def _dao():
+              dao = BookSqliteORM("sqlite://")
+              _fill(dao.engine)
+              return dao
+
+          def test_findByTag():
+              """findByTag('sf') renvoie 3 livres triés par titre"""
+              res = _dao().findByTag("sf") or []
+              assert [b.title for b in res] == ["Dune", "Fondation", "Les Robots"], f"obtenu {[b.title for b in res]}"
+
+          def test_findByTag_relations():
+              """les tags des livres trouvés sont lisibles après close"""
+              res = _dao().findByTag("Polar")
+              try:
+                  assert sorted(t.name for t in res[0].tags) == ["Classique", "Polar"]
+              except AssertionError:
+                  raise
+              except Exception as e:
+                  raise AssertionError(f"{type(e).__name__} : utilise self._query_with_relations(session)")
+
+          def test_countByTag():
+              """countByTag() == {'Classique': 2, 'Polar': 1, 'SF': 3}"""
+              res = _dao().countByTag()
+              assert res == {"Classique": 2, "Polar": 1, "SF": 3}, f"obtenu {res!r}"
+        solution: |
+          class BookSqliteORM(BookDAOBase):
+              def findByTag(self, tag_name):
+                  session = self.connect()
+                  try:
+                      return (
+                          self._query_with_relations(session)
+                          .join(Book.tags)
+                          .filter(Tag.name.ilike(tag_name))
+                          .order_by(Book.title)
+                          .all()
+                      )
+                  finally:
+                      session.close()
+
+              def countByTag(self):
+                  session = self.connect()
+                  try:
+                      rows = (
+                          session.query(Tag.name, func.count(Book.id))
+                          .join(Tag.books)
+                          .group_by(Tag.name)
+                          .all()
+                      )
+                      return {name: n for name, n in rows}
+                  finally:
+                      session.close()
+        indices:
+          - "`findByTag` : `self._query_with_relations(session).join(Book.tags).filter(Tag.name.ilike(tag_name))`."
+          - "`countByTag` : deux options. Soit `session.query(Tag).options(selectinload(Tag.books)).all()` puis `len(t.books)`, soit `func.count` avec `group_by`."
+      - type: code
+        tags: [factory, blueprint, filters, jsonify]
+        enonce: |
+          Écris, **dans un seul fichier** pour l'exercice, un blueprint `books_bp` (nom `'books'`) et une factory `create_app()` qui l'enregistre sous `/books`.
+          - `GET /books/` renvoie en JSON la liste des `to_dict()` des livres. Avec `?tag=X`, seulement ceux du tag X.
+          - `GET /books/<id>` renvoie le livre, ou une erreur 404.
+          Le service `BookService` est fourni : il propose `getAllBooks()`, `getBooksByTag(tag)` et `getBookById(id)` (qui renvoie une liste).
+        setup: |
+          class _B:
+              def __init__(self, id, title, tags):
+                  self.id, self.title, self.tags = id, title, tags
+              def to_dict(self):
+                  return {"id": self.id, "title": self.title}
+          _DATA = [_B(1, "Dune", ["SF"]), _B(2, "Fondation", ["SF"]), _B(3, "Maigret", ["Polar"])]
+          class BookService:
+              def getAllBooks(self):
+                  return list(_DATA)
+              def getBooksByTag(self, tag):
+                  return [b for b in _DATA if tag in b.tags]
+              def getBookById(self, id):
+                  return [b for b in _DATA if b.id == id]
+          fake_module("app.services.BookService", BookService=BookService)
+        starter: |
+          from flask import Flask, Blueprint, jsonify, request, abort
+
+          books_bp = Blueprint('books', __name__)
+
+
+          def create_app():
+              pass
+        tests: |
+          def _client():
+              app = create_app()
+              assert app is not None, "create_app doit retourner l'application"
+              return app.test_client()
+
+          def test_liste():
+              """GET /books/ renvoie 200 et 3 livres"""
+              r = _client().get("/books/")
+              assert r.status_code == 200, f"statut {r.status_code} : blueprint enregistré avec url_prefix='/books' ?"
+              assert len(r.get_json()) == 3
+
+          def test_filtre():
+              """GET /books/?tag=SF renvoie Dune et Fondation"""
+              r = _client().get("/books/?tag=SF")
+              assert [b["title"] for b in r.get_json()] == ["Dune", "Fondation"]
+
+          def test_detail():
+              """GET /books/3 renvoie Maigret, GET /books/9 renvoie 404"""
+              c = _client()
+              data = c.get("/books/3").get_json()
+              assert (data.get("title") if isinstance(data, dict) else data[0]["title"]) == "Maigret"
+              assert c.get("/books/9").status_code == 404
+        solution: |
+          from flask import Flask, Blueprint, jsonify, request, abort
+          from app.services.BookService import BookService
+
+          books_bp = Blueprint('books', __name__)
+
+
+          @books_bp.route('/', methods=['GET'])
+          def books():
+              bs = BookService()
+              tag = request.args.get('tag')
+              data = bs.getBooksByTag(tag) if tag else bs.getAllBooks()
+              return jsonify([b.to_dict() for b in data])
+
+
+          @books_bp.route('/<int:book_id>', methods=['GET'])
+          def book_view(book_id):
+              book = BookService().getBookById(book_id)
+              if not book:
+                  abort(404)
+              return jsonify(book[0].to_dict())
+
+
+          def create_app():
+              app = Flask(__name__)
+              app.register_blueprint(books_bp, url_prefix='/books')
+              return app
+        indices:
+          - "Déclare les routes sur `books_bp` **avant** d'appeler `create_app()`."
+          - "`app.register_blueprint(books_bp, url_prefix='/books')`, puis `return app`."
+
+  # ===================================================================== PALIER 4
+  - id: "3.10"
+    palier: 4
+    title: "Sujet papier A : bibliothèque complète"
+    memo: |
+      **Sujet.** Une application `library`, sur le modèle de l'application super-héros.
+      - Le schéma : `authors(id, name NOT NULL UNIQUE)`, `books(id, title NOT NULL, year, author_id REFERENCES authors(id) ON DELETE SET NULL)`, `tags(id, name NOT NULL UNIQUE)`, `book_tags(book_id, tag_id)` (N-N, CASCADE).
+      - Les user stories : voir les livres en les filtrant par tag ou par auteur, voir la fiche d'un livre, voir les statistiques sur l'accueil.
+      - Chaque question est validée seule. Recopie ce dont tu as besoin.
+    exercises:
+      - type: papier
+        tags: [schema-to-model, relation-1N, relation-NN, association-table]
+        enonce: "Écris les modèles : la table `book_tags`, puis `Author`, `Book` et `Tag`, avec toutes leurs relations (`Author.books` ↔ `Book.author`, `Book.tags` ↔ `Tag.books`). `Base` et `BaseModelMixin` s'importent depuis `app.models.base`."
+        duree: 720
+        setup: |
+          from sqlalchemy.orm import declarative_base
+          Base = declarative_base()
+          class BaseModelMixin:
+              pass
+          fake_module("app.models.base", Base=Base, BaseModelMixin=BaseModelMixin)
+        tests: |
+          from sqlalchemy import inspect, create_engine
+          from sqlalchemy.orm import sessionmaker
+
+          def test_association():
+              """book_tags : PK composée, FK CASCADE"""
+              assert {c.name for c in book_tags.primary_key.columns} == {"book_id", "tag_id"}
+              assert all(list(c.foreign_keys)[0].ondelete == "CASCADE" for c in book_tags.columns)
+
+          def test_author_book():
+              """Author.books ↔ Book.author, author_id en SET NULL"""
+              assert inspect(Author).relationships["books"].back_populates == "author"
+              fk = list(Book.__table__.c.author_id.foreign_keys)[0]
+              assert fk.target_fullname == "authors.id" and fk.ondelete == "SET NULL"
+
+          def test_tags():
+              """Book.tags ↔ Tag.books (secondary)"""
+              r = inspect(Book).relationships["tags"]
+              assert r.secondary is book_tags and r.back_populates == "books"
+
+          def test_contraintes():
+              """noms uniques et obligatoires, title obligatoire, mixin hérité"""
+              assert Author.__table__.c.name.unique and Tag.__table__.c.name.unique
+              assert Book.__table__.c.title.nullable is False
+              assert BaseModelMixin in Book.__mro__
+
+          def test_insertion():
+              """insertion complète possible"""
+              e = create_engine("sqlite://")
+              Base.metadata.create_all(e)
+              s = sessionmaker(bind=e)()
+              s.add(Book(title="Dune", author=Author(name="Frank Herbert"), tags=[Tag(name="SF")]))
+              s.commit()
+              assert s.query(Book).one().author.name == "Frank Herbert"
+        grille:
+          - {critere: "`book_tags = Table('book_tags', Base.metadata, ...)` avec 2 FK CASCADE en `primary_key=True`", points: 1.5, auto: test_association}
+          - {critere: "`Author` : table, colonnes, `books = relationship('Book', back_populates='author')`", points: 1.5, auto: test_author_book}
+          - {critere: "`Book` : `author_id = Column(Integer, ForeignKey('authors.id', ondelete='SET NULL'))` + `author = relationship(...)`", points: 1.5, auto: test_author_book}
+          - {critere: "`Book.tags` / `Tag.books` avec `secondary=book_tags` et `back_populates`", points: 1.5, auto: test_tags}
+          - {critere: "`(Base, BaseModelMixin)`, `unique` / `nullable` conformes au schéma", points: 1, auto: test_contraintes}
+        solution: |
+          from sqlalchemy import Table, Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import relationship
+          from app.models.base import Base, BaseModelMixin
+
+          # associations.py
+          book_tags = Table(
+              'book_tags',
+              Base.metadata,
+              Column('book_id', Integer, ForeignKey('books.id', ondelete='CASCADE'), primary_key=True),
+              Column('tag_id', Integer, ForeignKey('tags.id', ondelete='CASCADE'), primary_key=True)
+          )
+
+
+          class Author(Base, BaseModelMixin):
+              __tablename__ = 'authors'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              name = Column(String(150), unique=True, nullable=False, index=True)
+              books = relationship('Book', back_populates='author')
+
+
+          class Book(Base, BaseModelMixin):
+              __tablename__ = 'books'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              title = Column(String(255), nullable=False, index=True)
+              year = Column(Integer, nullable=True)
+              author_id = Column(Integer, ForeignKey('authors.id', ondelete='SET NULL'), nullable=True, index=True)
+              author = relationship('Author', back_populates='books')
+              tags = relationship('Tag', secondary=book_tags, back_populates='books')
+
+
+          class Tag(Base, BaseModelMixin):
+              __tablename__ = 'tags'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              name = Column(String(50), unique=True, nullable=False, index=True)
+              books = relationship('Book', secondary=book_tags, back_populates='tags')
+      - type: papier
+        tags: [dao-orm, loading, join, try-finally]
+        enonce: "Écris `BookSqliteORM` : `__init__(db_uri)`, `connect()`, `_query_with_relations` (avec `author` et `tags`), `findAll(limit=None)` (triés par titre) et `findByAuthor(name)` (qui contient `name`, insensible à la casse). Les modèles sont fournis."
+        duree: 660
+        setup: *library_models
+        tests: |
+          def _dao():
+              dao = BookSqliteORM("sqlite://")
+              _fill(dao.engine)
+              return dao
+
+          def test_connect():
+              """connect() renvoie une session avec expire_on_commit=False"""
+              s = _dao().connect()
+              assert s.expire_on_commit is False
+              s.close()
+
+          def test_findAll():
+              """findAll() trié par titre, relations lisibles après close"""
+              res = _dao().findAll()
+              assert [b.title for b in res][:2] == ["Dune", "Fondation"]
+              try:
+                  assert res[0].author.name == "Frank Herbert" and len(res[0].tags) == 2
+              except AssertionError:
+                  raise
+              except Exception as e:
+                  raise AssertionError(f"{type(e).__name__} : relations non chargées")
+
+          def test_findByAuthor():
+              """findByAuthor('asimov') renvoie 2 livres"""
+              assert sorted(b.title for b in _dao().findByAuthor("asimov")) == ["Fondation", "Les Robots"]
+        grille:
+          - {critere: "`__init__` : `create_engine` + `sessionmaker(bind=self.engine, expire_on_commit=False)`", points: 1, auto: test_connect}
+          - {critere: "`_query_with_relations` : `joinedload(Book.author)` + `selectinload(Book.tags)`", points: 1.5, auto: test_findAll}
+          - {critere: "`findAll` : `order_by(Book.title)`, `limit` facultatif, `try / finally`", points: 1.5, auto: test_findAll}
+          - {critere: "`findByAuthor` : `.join(Book.author).filter(Author.name.ilike(f\"%{name}%\"))`", points: 1.5, auto: test_findByAuthor}
+        solution: |
+          from sqlalchemy import create_engine
+          from sqlalchemy.orm import sessionmaker, joinedload, selectinload
+          from app.models.Book import Book
+          from app.models.Author import Author
+
+
+          class BookSqliteORM:
+              def __init__(self, db_uri="sqlite:///library.db"):
+                  self.engine = create_engine(db_uri, echo=False)
+                  self.SessionFactory = sessionmaker(bind=self.engine, expire_on_commit=False)
+
+              def connect(self):
+                  return self.SessionFactory()
+
+              def _query_with_relations(self, session):
+                  return session.query(Book).options(
+                      joinedload(Book.author),
+                      selectinload(Book.tags)
+                  )
+
+              def findAll(self, limit=None):
+                  session = self.connect()
+                  try:
+                      query = self._query_with_relations(session).order_by(Book.title)
+                      if limit is not None:
+                          query = query.limit(limit)
+                      return query.all()
+                  finally:
+                      session.close()
+
+              def findByAuthor(self, name):
+                  session = self.connect()
+                  try:
+                      return (
+                          self._query_with_relations(session)
+                          .join(Book.author)
+                          .filter(Author.name.ilike(f"%{name}%"))
+                          .all()
+                      )
+                  finally:
+                      session.close()
+      - type: papier
+        tags: [service, service-stats, distinct, count]
+        enonce: "Écris `BookService` : `__init__(db_path=None, db_uri=None)` (qui lit la configuration via `current_app` si besoin) avec `self.bdao = BookSqliteORM(db_path=db_path, db_uri=db_uri)`, puis `getBooksByTag(tag)` (qui délègue), `getYears()` (les années distinctes triées, via une session du DAO) et `getStatsSummary()` (les totaux de livres, d'auteurs et de tags)."
+        duree: 600
+        setup: |
+          from sqlalchemy import Table, Column, Integer, String, ForeignKey, create_engine
+          from sqlalchemy.orm import declarative_base, relationship, sessionmaker, joinedload, selectinload
+          Base = declarative_base()
+          book_tags = Table('book_tags', Base.metadata,
+              Column('book_id', Integer, ForeignKey('books.id'), primary_key=True),
+              Column('tag_id', Integer, ForeignKey('tags.id'), primary_key=True))
+          class Author(Base):
+              __tablename__ = 'authors'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(150))
+              books = relationship('Book', back_populates='author')
+          class Book(Base):
+              __tablename__ = 'books'
+              id = Column(Integer, primary_key=True)
+              title = Column(String(255))
+              year = Column(Integer)
+              author_id = Column(Integer, ForeignKey('authors.id'))
+              author = relationship('Author', back_populates='books')
+              tags = relationship('Tag', secondary=book_tags, back_populates='books')
+          class Tag(Base):
+              __tablename__ = 'tags'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(50))
+              books = relationship('Book', secondary=book_tags, back_populates='tags')
+          class _DAO:
+              def __init__(self, db_path=None, db_uri=None):
+                  self.engine = create_engine("sqlite://")
+                  self.SessionFactory = sessionmaker(bind=self.engine, expire_on_commit=False)
+                  Base.metadata.create_all(self.engine)
+                  s = self.SessionFactory()
+                  sf, pol = Tag(name='SF'), Tag(name='Polar')
+                  asimov = Author(name='Isaac Asimov')
+                  s.add_all([Book(title='Fondation', year=1951, author=asimov, tags=[sf]),
+                             Book(title='Les Robots', year=1950, author=asimov, tags=[sf]),
+                             Book(title='Dune', year=1965, author=Author(name='Frank Herbert'), tags=[sf]),
+                             Book(title='Maigret', year=1931, tags=[pol]), Book(title='Sans date', year=None)])
+                  s.commit()
+                  s.close()
+              def connect(self):
+                  return self.SessionFactory()
+              def findByTag(self, tag):
+                  s = self.connect()
+                  try:
+                      return s.query(Book).join(Book.tags).filter(Tag.name.ilike(tag)).all()
+                  finally:
+                      s.close()
+          fake_module("app.models.BookDAO", BookSqliteORM=_DAO)
+          fake_module("app.models.Book", Book=Book)
+          fake_module("app.models.Author", Author=Author)
+          fake_module("app.models.Tag", Tag=Tag)
+        tests: |
+          def test_by_tag():
+              """getBooksByTag('SF') délègue au DAO (3 livres)"""
+              assert len(BookService(db_uri="sqlite://").getBooksByTag("SF")) == 3
+
+          def test_years():
+              """getYears() == [1931, 1950, 1951, 1965] (sans None, sans doublon)"""
+              assert BookService(db_uri="sqlite://").getYears() == [1931, 1950, 1951, 1965]
+
+          def test_stats():
+              """getStatsSummary() compte livres, auteurs, tags"""
+              st = BookService(db_uri="sqlite://").getStatsSummary()
+              assert st == {"total_books": 5, "total_authors": 2, "total_tags": 2}, f"obtenu {st}"
+        grille:
+          - {critere: "Constructeur : `current_app.config` si rien n'est fourni (`try / except RuntimeError`), puis `self.bdao = BookSqliteORM(...)`", points: 1}
+          - {critere: "`getBooksByTag` renvoie `self.bdao.findByTag(tag)`", points: 0.5, auto: test_by_tag}
+          - {critere: "`getYears` : `query(Book.year).filter(Book.year.isnot(None)).distinct().order_by(Book.year)` puis `[y[0] for y in ...]`", points: 2, auto: test_years}
+          - {critere: "`getStatsSummary` : dictionnaire de `.count()`", points: 1.5, auto: test_stats}
+          - {critere: "Session obtenue via `self.bdao.connect()`, fermée dans `finally`", points: 1}
+        solution: |
+          from flask import current_app
+          from app.models.BookDAO import BookSqliteORM
+          from app.models.Book import Book
+          from app.models.Author import Author
+          from app.models.Tag import Tag
+
+
+          class BookService:
+              def __init__(self, db_path=None, db_uri=None):
+                  if db_uri is None and db_path is None:
+                      try:
+                          db_uri = current_app.config.get('SQLALCHEMY_DATABASE_URI')
+                          db_path = current_app.config.get('DATABASE_PATH')
+                      except RuntimeError:
+                          pass
+                  self.bdao = BookSqliteORM(db_path=db_path, db_uri=db_uri)
+
+              def getBooksByTag(self, tag):
+                  return self.bdao.findByTag(tag)
+
+              def getYears(self):
+                  session = self.bdao.connect()
+                  try:
+                      years = (
+                          session.query(Book.year)
+                          .filter(Book.year.isnot(None))
+                          .distinct()
+                          .order_by(Book.year)
+                          .all()
+                      )
+                      return [y[0] for y in years]
+                  finally:
+                      session.close()
+
+              def getStatsSummary(self):
+                  session = self.bdao.connect()
+                  try:
+                      return {
+                          "total_books": session.query(Book).count(),
+                          "total_authors": session.query(Author).count(),
+                          "total_tags": session.query(Tag).count(),
+                      }
+                  finally:
+                      session.close()
+      - type: papier
+        tags: [blueprint, filters, request-args, route-params]
+        enonce: "Écris `app/blueprints/books/routes.py` : `GET /` (avec les filtres `?tag=` ou `?author=`, le tag étant prioritaire, en JSON) et `GET /<id>` (404 si le livre n'existe pas). Le service propose `getAllBooks()`, `getBooksByTag(t)`, `getBooksByAuthor(a)` et `getBookById(id)` (une liste)."
+        duree: 480
+        setup: |
+          class _B:
+              def __init__(self, id, title, author, tags):
+                  self.id, self.title, self.author, self.tags = id, title, author, tags
+              def to_dict(self):
+                  return {"id": self.id, "title": self.title}
+          _D = [_B(1, "Dune", "Herbert", ["SF"]), _B(2, "Fondation", "Asimov", ["SF"]), _B(3, "Maigret", "Simenon", ["Polar"])]
+          class _S:
+              def __init__(self, *a, **k):
+                  pass
+              def getAllBooks(self):
+                  return list(_D)
+              def getBooksByTag(self, t):
+                  return [b for b in _D if t in b.tags]
+              def getBooksByAuthor(self, a):
+                  return [b for b in _D if a.lower() in b.author.lower()]
+              def getBookById(self, id):
+                  return [b for b in _D if b.id == id]
+          fake_module("app.services.BookService", BookService=_S)
+        tests: |
+          from flask import Flask
+
+          def _c():
+              app = Flask("t")
+              app.register_blueprint(books_bp, url_prefix="/books")
+              return app.test_client()
+
+          def test_tous():
+              """GET /books/ renvoie 3 livres"""
+              assert len(_c().get("/books/").get_json()) == 3
+
+          def test_filtres():
+              """?tag=SF → 2 livres ; ?author=simenon → Maigret ; tag prioritaire"""
+              c = _c()
+              assert len(c.get("/books/?tag=SF").get_json()) == 2
+              assert [b["title"] for b in c.get("/books/?author=simenon").get_json()] == ["Maigret"]
+              assert len(c.get("/books/?tag=SF&author=simenon").get_json()) == 2
+
+          def test_detail():
+              """GET /books/2 → Fondation ; /books/7 → 404"""
+              c = _c()
+              d = c.get("/books/2").get_json()
+              assert (d.get("title") if isinstance(d, dict) else d[0]["title"]) == "Fondation"
+              assert c.get("/books/7").status_code == 404
+        grille:
+          - {critere: "`books_bp = Blueprint('books', __name__, template_folder='templates')`", points: 1}
+          - {critere: "Lecture de `request.args.get('tag')` et `request.args.get('author')`", points: 1, auto: test_filtres}
+          - {critere: "Cascade `if tag / elif author / else`, avec le tag prioritaire", points: 1.5, auto: test_filtres}
+          - {critere: "`jsonify([b.to_dict() for b in data])`", points: 1, auto: test_tous}
+          - {critere: "`'/<int:book_id>'` et `abort(404)` si la liste est vide", points: 1.5, auto: test_detail}
+        solution: |
+          from flask import Blueprint, request, jsonify, abort
+          from app.services.BookService import BookService
+
+          books_bp = Blueprint('books', __name__, template_folder='templates')
+
+
+          @books_bp.route('/', methods=['GET'])
+          def books():
+              bs = BookService()
+              tag = request.args.get('tag')
+              author = request.args.get('author')
+              if tag:
+                  data = bs.getBooksByTag(tag)
+              elif author:
+                  data = bs.getBooksByAuthor(author)
+              else:
+                  data = bs.getAllBooks()
+              return jsonify([b.to_dict() for b in data])
+
+
+          @books_bp.route('/<int:book_id>', methods=['GET'])
+          def book_detail(book_id):
+              book = BookService().getBookById(book_id)
+              if not book:
+                  abort(404)
+              return jsonify(book[0].to_dict())
+      - type: papier
+        tags: [factory, init-all, register-bp]
+        enonce: "Écris `app/models/__init__.py` (les imports dans le bon ordre, et `__all__`), puis la partie de `create_app()` qui enregistre `index_bp` et `books_bp` (sous `/books`)."
+        duree: 360
+        grille:
+          - {critere: "Ordre des imports : `base` → `associations` → modèles → DAO", points: 1.5}
+          - {critere: "`__all__` liste tous les noms exportés, sous forme de chaînes", points: 1}
+          - {critere: "Import des blueprints dans `create_app()`", points: 1}
+          - {critere: "`register_blueprint(index_bp)` et `register_blueprint(books_bp, url_prefix='/books')`", points: 1.5}
+        solution: |
+          # app/models/__init__.py
+          from app.models.base import Base, BaseModelMixin, get_engine
+          from app.models.associations import book_tags
+          from app.models.Author import Author
+          from app.models.Tag import Tag
+          from app.models.Book import Book
+          from app.models.BookDAOInterface import BookDAOInterface
+          from app.models.BookDAO import BookSqliteORM
+
+          __all__ = ['Base', 'BaseModelMixin', 'get_engine', 'book_tags', 'Author', 'Tag', 'Book',
+                     'BookDAOInterface', 'BookSqliteORM']
+
+          # extrait de create_app()
+          from app.blueprints import index_bp, books_bp
+          app.register_blueprint(index_bp)
+          app.register_blueprint(books_bp, url_prefix='/books')
+      - type: papier
+        tags: [user-story, mvcs]
+        enonce: "Question de cours. User story : « en tant qu'utilisateur, je veux cliquer sur le nom d'un auteur pour voir tous ses livres ». Décris ce que tu ajoutes dans chaque couche (DAO, service, blueprint, vue) et donne l'URL appelée."
+        duree: 300
+        grille:
+          - {critere: "DAO : `findByAuthor(name)` avec `join(Book.author)` + `ilike` (ou filtre sur l'id)", points: 1}
+          - {critere: "Service : `getBooksByAuthor(name)`, qui délègue au DAO", points: 1}
+          - {critere: "Blueprint : `?author=` sur `/books/` ou une route `/books/author/<string:name>`", points: 1}
+          - {critere: "Vue : lien `url_for('books.books', author=...)` sur le nom de l'auteur, et réutilisation de la liste", points: 1}
+        solution: |
+          DAO      : findByAuthor(name) → _query_with_relations(session).join(Book.author)
+                     .filter(Author.name.ilike(f"%{name}%")).all(), dans un try/finally.
+          Service  : getBooksByAuthor(name) → return self.bdao.findByAuthor(name)
+          Blueprint: dans books(), author = request.args.get('author') → bs.getBooksByAuthor(author)
+                     (ou une route dédiée @books_bp.route('/author/<string:name>'))
+          Vue      : <a href="{{ url_for('books.books', author=book.author.name) }}">…</a>
+          URL      : GET /books/?author=Asimov
+
+  - id: "3.11"
+    palier: 4
+    title: "Sujet papier B : festival de musique"
+    memo: |
+      **Sujet.** Une application `festival`.
+      - Le schéma : `stages(id, name UNIQUE, capacity DEFAULT 1000)`, `artists(id, name UNIQUE)`, `genres(id, name UNIQUE)`, `artist_genres(artist_id, genre_id)` (N-N, CASCADE), `concerts(id, artist_id NOT NULL → artists ON DELETE CASCADE, stage_id → stages ON DELETE SET NULL, day INTEGER NOT NULL, start_hour INTEGER)`.
+      - Les user stories : voir le programme d'un jour trié par heure, voir les concerts d'une scène, compter les concerts par scène.
+    exercises:
+      - type: papier
+        tags: [schema-to-model, relation-NN, cascade]
+        enonce: "Écris `artist_genres`, `Genre` et `Artist` (avec `genres` en N-N et `concerts` en 1-N avec cascade). `Stage` et `Concert` existent déjà (`Concert.artist` a `back_populates='concerts'`)."
+        duree: 540
+        setup: |
+          from sqlalchemy import Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import declarative_base, relationship
+          Base = declarative_base()
+          class Stage(Base):
+              __tablename__ = 'stages'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(100), unique=True)
+              concerts = relationship('Concert', back_populates='stage')
+          class Concert(Base):
+              __tablename__ = 'concerts'
+              id = Column(Integer, primary_key=True)
+              artist_id = Column(Integer, ForeignKey('artists.id', ondelete='CASCADE'), nullable=False)
+              stage_id = Column(Integer, ForeignKey('stages.id', ondelete='SET NULL'))
+              day = Column(Integer, nullable=False)
+              artist = relationship('Artist', back_populates='concerts')
+              stage = relationship('Stage', back_populates='concerts')
+        tests: |
+          from sqlalchemy import inspect, create_engine
+          from sqlalchemy.orm import sessionmaker
+
+          def test_assoc():
+              """artist_genres : PK composée artist_id/genre_id, CASCADE"""
+              assert {c.name for c in artist_genres.primary_key.columns} == {"artist_id", "genre_id"}
+              assert {list(c.foreign_keys)[0].target_fullname for c in artist_genres.columns} == {"artists.id", "genres.id"}
+
+          def test_relations():
+              """Artist.genres ↔ Genre.artists ; Artist.concerts avec cascade"""
+              ra = inspect(Artist).relationships
+              assert ra["genres"].secondary is artist_genres and ra["genres"].back_populates == "artists"
+              assert ra["concerts"].back_populates == "artist" and ra["concerts"].cascade.delete_orphan
+
+          def test_cascade():
+              """supprimer un artiste supprime ses concerts"""
+              e = create_engine("sqlite://")
+              Base.metadata.create_all(e)
+              s = sessionmaker(bind=e)()
+              a = Artist(name="Justice")
+              a.genres = [Genre(name="Électro")]
+              a.concerts = [Concert(day=1)]
+              s.add(a)
+              s.commit()
+              s.delete(a)
+              s.commit()
+              assert s.query(Concert).count() == 0
+        grille:
+          - {critere: "`artist_genres = Table(...)` avec 2 FK CASCADE en PK", points: 1.5, auto: test_assoc}
+          - {critere: "`Genre` : `name` unique et obligatoire, `artists = relationship('Artist', secondary=artist_genres, back_populates='genres')`", points: 1.5, auto: test_relations}
+          - {critere: "`Artist.genres` avec `secondary` et `back_populates='artists'`", points: 1, auto: test_relations}
+          - {critere: "`Artist.concerts = relationship('Concert', back_populates='artist', cascade='all, delete-orphan')`", points: 1.5, auto: test_cascade}
+        solution: |
+          from sqlalchemy import Table, Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import relationship
+
+          artist_genres = Table(
+              'artist_genres',
+              Base.metadata,
+              Column('artist_id', Integer, ForeignKey('artists.id', ondelete='CASCADE'), primary_key=True),
+              Column('genre_id', Integer, ForeignKey('genres.id', ondelete='CASCADE'), primary_key=True)
+          )
+
+
+          class Genre(Base):
+              __tablename__ = 'genres'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              name = Column(String(100), unique=True, nullable=False)
+              artists = relationship('Artist', secondary=artist_genres, back_populates='genres')
+
+
+          class Artist(Base):
+              __tablename__ = 'artists'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              name = Column(String(150), unique=True, nullable=False)
+              genres = relationship('Genre', secondary=artist_genres, back_populates='artists')
+              concerts = relationship('Concert', back_populates='artist', cascade='all, delete-orphan')
+      - type: papier
+        tags: [dao-orm, loading, join, query]
+        enonce: "Écris `ConcertSqliteORM` : `__init__(db_uri)`, `connect()`, `findByDay(day)` (trié par `start_hour`, avec `artist` et `stage` chargés) et `findByStage(stage_name)` (insensible à la casse)."
+        duree: 600
+        setup: &festival_models |
+          from sqlalchemy import Table, Column, Integer, String, ForeignKey, create_engine, func
+          from sqlalchemy.orm import declarative_base, relationship, sessionmaker, joinedload, selectinload
+          Base = declarative_base()
+          class Stage(Base):
+              __tablename__ = 'stages'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(100), unique=True, nullable=False)
+              concerts = relationship('Concert', back_populates='stage')
+          class Artist(Base):
+              __tablename__ = 'artists'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(150), unique=True, nullable=False)
+              concerts = relationship('Concert', back_populates='artist', cascade='all, delete-orphan')
+          class Concert(Base):
+              __tablename__ = 'concerts'
+              id = Column(Integer, primary_key=True)
+              artist_id = Column(Integer, ForeignKey('artists.id', ondelete='CASCADE'), nullable=False)
+              stage_id = Column(Integer, ForeignKey('stages.id', ondelete='SET NULL'))
+              day = Column(Integer, nullable=False)
+              start_hour = Column(Integer)
+              artist = relationship('Artist', back_populates='concerts')
+              stage = relationship('Stage', back_populates='concerts')
+          def _fill(engine):
+              Base.metadata.create_all(engine)
+              s = sessionmaker(bind=engine)()
+              grande, club = Stage(name='Grande scène'), Stage(name='Club')
+              s.add_all([
+                  Concert(artist=Artist(name='Justice'), stage=grande, day=1, start_hour=23),
+                  Concert(artist=Artist(name='Air'), stage=grande, day=1, start_hour=21),
+                  Concert(artist=Artist(name='Daft Punk'), stage=grande, day=2, start_hour=22),
+                  Concert(artist=Artist(name='Polo & Pan'), stage=club, day=1, start_hour=19),
+              ])
+              s.commit()
+              s.close()
+          fake_module("app.models.Concert", Concert=Concert)
+          fake_module("app.models.Stage", Stage=Stage)
+          fake_module("app.models.Artist", Artist=Artist)
+        tests: |
+          def _dao():
+              d = ConcertSqliteORM("sqlite://")
+              _fill(d.engine)
+              return d
+
+          def test_day():
+              """findByDay(1) trié par heure : Polo & Pan, Air, Justice"""
+              res = _dao().findByDay(1)
+              try:
+                  names = [c.artist.name for c in res]
+              except Exception as e:
+                  raise AssertionError(f"{type(e).__name__} : charge Concert.artist (joinedload)")
+              assert names == ["Polo & Pan", "Air", "Justice"], f"obtenu {names}"
+
+          def test_stage():
+              """findByStage('grande') renvoie 3 concerts, scène lisible après close"""
+              res = _dao().findByStage("grande")
+              assert len(res) == 3
+              try:
+                  assert res[0].stage.name == "Grande scène"
+              except Exception as e:
+                  raise AssertionError(f"{type(e).__name__} : charge Concert.stage")
+        grille:
+          - {critere: "`__init__` + `connect()` (avec `expire_on_commit=False`)", points: 1}
+          - {critere: "`findByDay` : `filter(Concert.day == day).order_by(Concert.start_hour)`", points: 1.5, auto: test_day}
+          - {critere: "`joinedload(Concert.artist)` et `joinedload(Concert.stage)`", points: 1.5, auto: test_stage}
+          - {critere: "`findByStage` : `.join(Concert.stage).filter(Stage.name.ilike(...))`", points: 1.5, auto: test_stage}
+          - {critere: "`try / finally: session.close()` partout", points: 0.5}
+        solution: |
+          from sqlalchemy import create_engine
+          from sqlalchemy.orm import sessionmaker, joinedload
+          from app.models.Concert import Concert
+          from app.models.Stage import Stage
+
+
+          class ConcertSqliteORM:
+              def __init__(self, db_uri="sqlite:///festival.db"):
+                  self.engine = create_engine(db_uri)
+                  self.SessionFactory = sessionmaker(bind=self.engine, expire_on_commit=False)
+
+              def connect(self):
+                  return self.SessionFactory()
+
+              def _query_with_relations(self, session):
+                  return session.query(Concert).options(joinedload(Concert.artist), joinedload(Concert.stage))
+
+              def findByDay(self, day):
+                  session = self.connect()
+                  try:
+                      return (
+                          self._query_with_relations(session)
+                          .filter(Concert.day == day)
+                          .order_by(Concert.start_hour)
+                          .all()
+                      )
+                  finally:
+                      session.close()
+
+              def findByStage(self, stage_name):
+                  session = self.connect()
+                  try:
+                      return (
+                          self._query_with_relations(session)
+                          .join(Concert.stage)
+                          .filter(Stage.name.ilike(f"%{stage_name}%"))
+                          .all()
+                      )
+                  finally:
+                      session.close()
+      - type: papier
+        tags: [service, service-stats]
+        enonce: "Écris `FestivalService` (DAO injecté dans le constructeur), avec `getProgramme(day)`, qui renvoie la liste `[\"19h · Polo & Pan (Club)\", ...]`, et `getConcertsPerStage()`, qui renvoie `{nom_scène: nombre}`. Le DAO propose `findByDay(day)` et `findAllStages()` (des scènes dont la liste `concerts` est chargée)."
+        duree: 480
+        setup: |
+          class _O:
+              def __init__(self, **k):
+                  self.__dict__.update(k)
+          _club, _grande = _O(name="Club", concerts=[]), _O(name="Grande scène", concerts=[])
+          _c = [_O(start_hour=19, artist=_O(name="Polo & Pan"), stage=_club, day=1),
+                _O(start_hour=21, artist=_O(name="Air"), stage=_grande, day=1),
+                _O(start_hour=23, artist=_O(name="Justice"), stage=_grande, day=1),
+                _O(start_hour=22, artist=_O(name="Daft Punk"), stage=_grande, day=2)]
+          for c in _c:
+              c.stage.concerts.append(c)
+          class FakeDAO:
+              def findByDay(self, day):
+                  return sorted([c for c in _c if c.day == day], key=lambda c: c.start_hour)
+              def findAllStages(self):
+                  return [_club, _grande]
+        tests: |
+          def test_programme():
+              """getProgramme(1) formate les concerts du jour"""
+              assert FestivalService(FakeDAO()).getProgramme(1) == ["19h · Polo & Pan (Club)", "21h · Air (Grande scène)", "23h · Justice (Grande scène)"]
+
+          def test_par_scene():
+              """getConcertsPerStage() == {'Club': 1, 'Grande scène': 3}"""
+              assert FestivalService(FakeDAO()).getConcertsPerStage() == {"Club": 1, "Grande scène": 3}
+        grille:
+          - {critere: "Constructeur : `self.cdao = dao`", points: 0.5}
+          - {critere: "`getProgramme` : boucle (ou compréhension) sur `self.cdao.findByDay(day)` et f-string", points: 2, auto: test_programme}
+          - {critere: "`getConcertsPerStage` : `{s.name: len(s.concerts) for s in ...}`", points: 2, auto: test_par_scene}
+          - {critere: "Annotations de type (`List[str]`, `Dict[str, int]`)", points: 0.5}
+        solution: |
+          from typing import List, Dict
+
+
+          class FestivalService:
+              def __init__(self, dao):
+                  self.cdao = dao
+
+              def getProgramme(self, day: int) -> List[str]:
+                  return [f"{c.start_hour}h · {c.artist.name} ({c.stage.name})" for c in self.cdao.findByDay(day)]
+
+              def getConcertsPerStage(self) -> Dict[str, int]:
+                  return {s.name: len(s.concerts) for s in self.cdao.findAllStages()}
+      - type: papier
+        tags: [blueprint, filters, request-args, jsonify]
+        enonce: "Écris `concerts_bp` et sa route `GET /` : avec `?day=2`, elle renvoie en JSON le programme du jour (`getProgramme`, en convertissant `day` en entier). Sans `day`, elle renvoie le nombre de concerts par scène (`getConcertsPerStage`). `FestivalService()` s'instancie sans argument."
+        duree: 360
+        setup: |
+          class _S:
+              def __init__(self, *a, **k):
+                  pass
+              def getProgramme(self, day):
+                  assert isinstance(day, int), "day doit être converti avec int(...)"
+                  return {1: ["21h · Air (Grande scène)"], 2: ["22h · Daft Punk (Grande scène)"]}.get(day, [])
+              def getConcertsPerStage(self):
+                  return {"Club": 1, "Grande scène": 3}
+          fake_module("app.services.FestivalService", FestivalService=_S)
+        tests: |
+          from flask import Flask
+
+          def _c():
+              app = Flask("t")
+              app.register_blueprint(concerts_bp, url_prefix="/concerts")
+              return app.test_client()
+
+          def test_day():
+              """GET /concerts/?day=2 renvoie le programme du jour 2"""
+              r = _c().get("/concerts/?day=2")
+              assert r.status_code == 200, r.get_data(as_text=True)[-200:]
+              assert r.get_json() == ["22h · Daft Punk (Grande scène)"]
+
+          def test_sans_day():
+              """GET /concerts/ renvoie le nombre de concerts par scène"""
+              assert _c().get("/concerts/").get_json() == {"Club": 1, "Grande scène": 3}
+        grille:
+          - {critere: "`concerts_bp = Blueprint('concerts', __name__)`", points: 1}
+          - {critere: "`day = request.args.get('day')` puis `int(day)`", points: 1.5, auto: test_day}
+          - {critere: "Choix `getProgramme` / `getConcertsPerStage`", points: 1.5, auto: test_sans_day}
+          - {critere: "`return jsonify(...)`", points: 1}
+        solution: |
+          from flask import Blueprint, request, jsonify
+          from app.services.FestivalService import FestivalService
+
+          concerts_bp = Blueprint('concerts', __name__, template_folder='templates')
+
+
+          @concerts_bp.route('/', methods=['GET'])
+          def concerts():
+              fs = FestivalService()
+              day = request.args.get('day')
+              if day:
+                  return jsonify(fs.getProgramme(int(day)))
+              return jsonify(fs.getConcertsPerStage())
+      - type: papier
+        tags: [property, super, mixin]
+        enonce: "Écris, pour `Artist`, une `@property genres_str` (`\"Électro, House\"`), une `@property concerts_count`, et la surcharge `__getitem__`, qui renvoie `genres_str` pour la clé `'genres'` et délègue au mixin sinon. Écris seulement ces méthodes."
+        duree: 300
+        grille:
+          - {critere: "`@property def genres_str(self): return \", \".join(g.name for g in self.genres)`", points: 1.5}
+          - {critere: "`@property def concerts_count(self): return len(self.concerts)`", points: 1}
+          - {critere: "`if item == 'genres': return self.genres_str`", points: 1}
+          - {critere: "`return super().__getitem__(item)`", points: 1.5}
+        solution: |
+          @property
+          def genres_str(self):
+              if not self.genres:
+                  return ""
+              return ", ".join(g.name for g in self.genres)
+
+          @property
+          def concerts_count(self):
+              return len(self.concerts)
+
+          def __getitem__(self, item):
+              if item == "genres":
+                  return self.genres_str
+              return super().__getitem__(item)
+      - type: papier
+        tags: [n-plus-1, loading]
+        enonce: "Question de cours : la page « programme du jour » affiche pour chaque concert le nom de l'artiste et celui de la scène. Que se passe-t-il sans chargement anticipé ? Comment l'éviter, et pourquoi `joinedload` ici ?"
+        duree: 300
+        grille:
+          - {critere: "Sans eager loading, chaque `concert.artist` et `concert.stage` déclenche une requête : c'est le problème N+1", points: 1}
+          - {critere: "Après `session.close()`, l'accès lazy plante (`DetachedInstanceError`)", points: 1}
+          - {critere: "Solution : `options(joinedload(Concert.artist), joinedload(Concert.stage))` dans `_query_with_relations`", points: 1}
+          - {critere: "`joinedload`, car ce sont des relations to-one (N-1) : une seule requête avec jointure", points: 1}
+        solution: |
+          Sans chargement anticipé, la requête ramène N concerts, puis chaque accès à concert.artist et
+          concert.stage déclenche une requête supplémentaire : 1 + 2N requêtes (problème N+1). En plus, la
+          session étant fermée par le DAO, l'accès lazy dans le template lève DetachedInstanceError.
+          On centralise dans _query_with_relations : session.query(Concert).options(joinedload(Concert.artist),
+          joinedload(Concert.stage)). joinedload convient car artist et stage sont des relations to-one
+          (N-1) : une seule requête avec LEFT OUTER JOIN, sans duplication de lignes.
+
+  - id: "3.12"
+    palier: 4
+    title: "Sujet papier C : gestion d'école"
+    memo: |
+      **Sujet.** Une application `school`.
+      - Le schéma : `classes(id, name UNIQUE)`, `students(id, name NOT NULL, classe_id → classes ON DELETE SET NULL)`, `subjects(id, name UNIQUE)`, `grades(id, value FLOAT NOT NULL, student_id NOT NULL → students ON DELETE CASCADE, subject_id NOT NULL → subjects ON DELETE CASCADE)`.
+      - Les user stories : voir les élèves d'une classe, voir la fiche d'un élève avec sa moyenne, voir le classement d'une classe.
+    exercises:
+      - type: papier
+        tags: [schema-to-model, property, cascade]
+        enonce: "Écris `Student` (avec `classe` et `grades`), `Subject` et `Grade`, et une `@property average` sur `Student` (arrondie à 1 décimale, `None` s'il n'y a pas de note). `Classe` existe déjà (`Classe.students` a `back_populates='classe'`)."
+        duree: 660
+        setup: |
+          from sqlalchemy import Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import declarative_base, relationship
+          Base = declarative_base()
+          class Classe(Base):
+              __tablename__ = 'classes'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(50), unique=True, nullable=False)
+              students = relationship('Student', back_populates='classe')
+        tests: |
+          from sqlalchemy import inspect, create_engine
+          from sqlalchemy.orm import sessionmaker
+
+          def test_fk():
+              """classe_id SET NULL ; grades.student_id et subject_id CASCADE non nuls"""
+              assert list(Student.__table__.c.classe_id.foreign_keys)[0].ondelete == "SET NULL"
+              g = Grade.__table__.c
+              assert list(g.student_id.foreign_keys)[0].target_fullname == "students.id" and g.student_id.nullable is False
+              assert list(g.subject_id.foreign_keys)[0].target_fullname == "subjects.id"
+
+          def test_relations():
+              """Student.grades (cascade) ↔ Grade.student ; Subject.grades ↔ Grade.subject"""
+              r = inspect(Student).relationships
+              assert r["classe"].back_populates == "students"
+              assert r["grades"].back_populates == "student" and r["grades"].cascade.delete_orphan
+              assert inspect(Subject).relationships["grades"].back_populates == "subject"
+
+          def test_average():
+              """average (propriété) : 13.7 ; None sans note"""
+              st = Student(name="Lina")
+              m = Subject(name="Maths")
+              st.grades = [Grade(value=12, subject=m), Grade(value=15, subject=m), Grade(value=14, subject=m)]
+              assert st.average == 13.7
+              assert Student(name="X").average is None
+
+          def test_cascade():
+              """supprimer l'élève supprime ses notes"""
+              e = create_engine("sqlite://")
+              Base.metadata.create_all(e)
+              s = sessionmaker(bind=e)()
+              st = Student(name="Lina", classe=Classe(name="A"))
+              st.grades = [Grade(value=10, subject=Subject(name="Info"))]
+              s.add(st)
+              s.commit()
+              s.delete(st)
+              s.commit()
+              assert s.query(Grade).count() == 0
+        grille:
+          - {critere: "`Student` : `classe_id` FK `classes.id` en `SET NULL` + `classe = relationship(...)`", points: 1.5, auto: test_fk}
+          - {critere: "`Student.grades = relationship('Grade', back_populates='student', cascade='all, delete-orphan')`", points: 1.5, auto: test_cascade}
+          - {critere: "`Grade` : 2 FK `CASCADE` non nulles, `value` obligatoire, 2 relations", points: 1.5, auto: test_relations}
+          - {critere: "`Subject` : `name` unique, `grades = relationship('Grade', back_populates='subject')`", points: 1, auto: test_relations}
+          - {critere: "`@property average` avec garde-fou et `round(..., 1)`", points: 1.5, auto: test_average}
+        solution: |
+          from sqlalchemy import Column, Integer, String, Float, ForeignKey
+          from sqlalchemy.orm import relationship
+
+
+          class Student(Base):
+              __tablename__ = 'students'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              name = Column(String(100), nullable=False)
+              classe_id = Column(Integer, ForeignKey('classes.id', ondelete='SET NULL'), nullable=True)
+              classe = relationship('Classe', back_populates='students')
+              grades = relationship('Grade', back_populates='student', cascade='all, delete-orphan')
+
+              @property
+              def average(self):
+                  if not self.grades:
+                      return None
+                  return round(sum(g.value for g in self.grades) / len(self.grades), 1)
+
+
+          class Subject(Base):
+              __tablename__ = 'subjects'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              name = Column(String(100), unique=True, nullable=False)
+              grades = relationship('Grade', back_populates='subject')
+
+
+          class Grade(Base):
+              __tablename__ = 'grades'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              value = Column(Float, nullable=False)
+              student_id = Column(Integer, ForeignKey('students.id', ondelete='CASCADE'), nullable=False)
+              subject_id = Column(Integer, ForeignKey('subjects.id', ondelete='CASCADE'), nullable=False)
+              student = relationship('Student', back_populates='grades')
+              subject = relationship('Subject', back_populates='grades')
+      - type: papier
+        tags: [dao-orm, loading, join]
+        enonce: "Écris `StudentSqliteORM` : `__init__(db_uri)`, `connect()`, `_query_with_relations` (`classe` en to-one, `grades` en collection), `findByClasse(name)` (triés par nom) et `findById(id)` (qui renvoie `[eleve]` ou `[]`)."
+        duree: 600
+        setup: |
+          from sqlalchemy import Column, Integer, String, Float, ForeignKey, create_engine
+          from sqlalchemy.orm import declarative_base, relationship, sessionmaker, joinedload, selectinload
+          Base = declarative_base()
+          class Classe(Base):
+              __tablename__ = 'classes'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(50), unique=True, nullable=False)
+              students = relationship('Student', back_populates='classe')
+          class Student(Base):
+              __tablename__ = 'students'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(100), nullable=False)
+              classe_id = Column(Integer, ForeignKey('classes.id', ondelete='SET NULL'))
+              classe = relationship('Classe', back_populates='students')
+              grades = relationship('Grade', back_populates='student', cascade='all, delete-orphan')
+          class Grade(Base):
+              __tablename__ = 'grades'
+              id = Column(Integer, primary_key=True)
+              value = Column(Float, nullable=False)
+              student_id = Column(Integer, ForeignKey('students.id', ondelete='CASCADE'), nullable=False)
+              student = relationship('Student', back_populates='grades')
+          def _fill(engine):
+              Base.metadata.create_all(engine)
+              s = sessionmaker(bind=engine)()
+              a, b = Classe(name='BUT3-A'), Classe(name='BUT3-B')
+              s.add_all([
+                  Student(name='Sami', classe=a, grades=[Grade(value=11)]),
+                  Student(name='Lina', classe=a, grades=[Grade(value=15), Grade(value=13)]),
+                  Student(name='Hugo', classe=b, grades=[]),
+              ])
+              s.commit()
+              s.close()
+          fake_module("app.models.Student", Student=Student)
+          fake_module("app.models.Classe", Classe=Classe)
+        tests: |
+          def _dao():
+              d = StudentSqliteORM("sqlite://")
+              _fill(d.engine)
+              return d
+
+          def test_classe():
+              """findByClasse('BUT3-A') → Lina, Sami (triés), classe et notes lisibles"""
+              res = _dao().findByClasse("BUT3-A")
+              assert [s.name for s in res] == ["Lina", "Sami"]
+              try:
+                  assert res[0].classe.name == "BUT3-A" and len(res[0].grades) == 2
+              except AssertionError:
+                  raise
+              except Exception as e:
+                  raise AssertionError(f"{type(e).__name__} : relations non chargées")
+
+          def test_by_id():
+              """findById(3) → [Hugo], findById(9) → []"""
+              d = _dao()
+              assert [s.name for s in d.findById(3)] == ["Hugo"] and d.findById(9) == []
+        grille:
+          - {critere: "`__init__` / `connect` avec `expire_on_commit=False`", points: 1}
+          - {critere: "`_query_with_relations` : `joinedload(Student.classe)` + `selectinload(Student.grades)`", points: 1.5, auto: test_classe}
+          - {critere: "`findByClasse` : `.join(Student.classe).filter(Classe.name == name).order_by(Student.name)`", points: 1.5, auto: test_classe}
+          - {critere: "`findById` : `[s] if s else []`, `try / finally`", points: 1.5, auto: test_by_id}
+        solution: |
+          from sqlalchemy import create_engine
+          from sqlalchemy.orm import sessionmaker, joinedload, selectinload
+          from app.models.Student import Student
+          from app.models.Classe import Classe
+
+
+          class StudentSqliteORM:
+              def __init__(self, db_uri="sqlite:///school.db"):
+                  self.engine = create_engine(db_uri)
+                  self.SessionFactory = sessionmaker(bind=self.engine, expire_on_commit=False)
+
+              def connect(self):
+                  return self.SessionFactory()
+
+              def _query_with_relations(self, session):
+                  return session.query(Student).options(
+                      joinedload(Student.classe),
+                      selectinload(Student.grades)
+                  )
+
+              def findByClasse(self, name):
+                  session = self.connect()
+                  try:
+                      return (
+                          self._query_with_relations(session)
+                          .join(Student.classe)
+                          .filter(Classe.name == name)
+                          .order_by(Student.name)
+                          .all()
+                      )
+                  finally:
+                      session.close()
+
+              def findById(self, id):
+                  session = self.connect()
+                  try:
+                      s = self._query_with_relations(session).filter(Student.id == id).first()
+                      return [s] if s else []
+                  finally:
+                      session.close()
+      - type: papier
+        tags: [service, service-stats]
+        enonce: "Écris `SchoolService` (DAO injecté) avec `getClassRanking(classe)`. Elle renvoie la liste `[(nom, moyenne), ...]` triée de la meilleure à la moins bonne moyenne, en ignorant les élèves sans note. Le DAO propose `findByClasse(name)`, et chaque élève a une propriété `average`."
+        duree: 420
+        setup: |
+          class _St:
+              def __init__(self, name, average):
+                  self.name, self.average = name, average
+          class FakeDAO:
+              def findByClasse(self, name):
+                  return {"A": [_St("Sami", 11.0), _St("Lina", 14.0), _St("Emma", None), _St("Hugo", 16.5)]}.get(name, [])
+        tests: |
+          def test_ranking():
+              """getClassRanking('A') == [('Hugo', 16.5), ('Lina', 14.0), ('Sami', 11.0)]"""
+              assert SchoolService(FakeDAO()).getClassRanking("A") == [("Hugo", 16.5), ("Lina", 14.0), ("Sami", 11.0)]
+
+          def test_vide():
+              """classe inconnue → []"""
+              assert SchoolService(FakeDAO()).getClassRanking("Z") == []
+        grille:
+          - {critere: "Filtre des élèves dont `average` n'est pas `None`", points: 1.5, auto: test_ranking}
+          - {critere: "Construction des tuples `(s.name, s.average)`", points: 1, auto: test_ranking}
+          - {critere: "`sorted(..., key=lambda t: t[1], reverse=True)`", points: 1.5, auto: test_ranking}
+          - {critere: "Annotation `-> List[Tuple[str, float]]`", points: 0.5}
+        solution: |
+          from typing import List, Tuple
+
+
+          class SchoolService:
+              def __init__(self, dao):
+                  self.sdao = dao
+
+              def getClassRanking(self, classe: str) -> List[Tuple[str, float]]:
+                  rows = [(s.name, s.average) for s in self.sdao.findByClasse(classe) if s.average is not None]
+                  return sorted(rows, key=lambda t: t[1], reverse=True)
+      - type: papier
+        tags: [blueprint, route-params, filters, jsonify]
+        enonce: "Écris `students_bp` avec `GET /?classe=X` (la liste en JSON des `{\"id\", \"name\"}`, vide sans classe), `GET /<id>` (`{\"name\", \"average\"}` ou 404) et `GET /ranking/<classe>` (le classement en JSON). Le service propose `getStudentsByClasse`, `getStudentById` (une liste) et `getClassRanking`."
+        duree: 540
+        setup: |
+          class _St:
+              def __init__(self, id, name, average):
+                  self.id, self.name, self.average = id, name, average
+          class _S:
+              def __init__(self, *a, **k):
+                  pass
+              def getStudentsByClasse(self, c):
+                  return [_St(1, "Lina", 14.0), _St(2, "Sami", 11.0)] if c == "A" else []
+              def getStudentById(self, id):
+                  return [_St(1, "Lina", 14.0)] if id == 1 else []
+              def getClassRanking(self, c):
+                  return [("Lina", 14.0), ("Sami", 11.0)] if c == "A" else []
+          fake_module("app.services.SchoolService", SchoolService=_S)
+        tests: |
+          from flask import Flask
+
+          def _c():
+              app = Flask("t")
+              app.register_blueprint(students_bp, url_prefix="/students")
+              return app.test_client()
+
+          def test_liste():
+              """GET /students/?classe=A → 2 élèves ; sans classe → []"""
+              c = _c()
+              assert c.get("/students/?classe=A").get_json() == [{"id": 1, "name": "Lina"}, {"id": 2, "name": "Sami"}]
+              assert c.get("/students/").get_json() == []
+
+          def test_fiche():
+              """GET /students/1 → Lina 14.0 ; /students/5 → 404"""
+              c = _c()
+              assert c.get("/students/1").get_json() == {"name": "Lina", "average": 14.0}
+              assert c.get("/students/5").status_code == 404
+
+          def test_ranking():
+              """GET /students/ranking/A → classement"""
+              assert _c().get("/students/ranking/A").get_json() == [["Lina", 14.0], ["Sami", 11.0]]
+        grille:
+          - {critere: "`request.args.get('classe')` et une liste vide sans classe", points: 1.5, auto: test_liste}
+          - {critere: "`'/<int:student_id>'` avec `abort(404)` et `jsonify({...})`", points: 1.5, auto: test_fiche}
+          - {critere: "`'/ranking/<string:classe>'` → `jsonify(service.getClassRanking(classe))`", points: 1.5, auto: test_ranking}
+          - {critere: "Imports et déclaration du blueprint", points: 0.5}
+        solution: |
+          from flask import Blueprint, request, jsonify, abort
+          from app.services.SchoolService import SchoolService
+
+          students_bp = Blueprint('students', __name__, template_folder='templates')
+
+
+          @students_bp.route('/', methods=['GET'])
+          def students():
+              classe = request.args.get('classe')
+              if not classe:
+                  return jsonify([])
+              data = SchoolService().getStudentsByClasse(classe)
+              return jsonify([{"id": s.id, "name": s.name} for s in data])
+
+
+          @students_bp.route('/<int:student_id>', methods=['GET'])
+          def student_view(student_id):
+              res = SchoolService().getStudentById(student_id)
+              if not res:
+                  abort(404)
+              return jsonify({"name": res[0].name, "average": res[0].average})
+
+
+          @students_bp.route('/ranking/<string:classe>', methods=['GET'])
+          def ranking(classe):
+              return jsonify(SchoolService().getClassRanking(classe))
+      - type: papier
+        tags: [factory, main, register-bp]
+        enonce: "Écris `create_app()` (configuration de `DATABASE_PATH` et de `SQLALCHEMY_DATABASE_URI` vers `school.db`, puis enregistrement d'`index_bp` et de `students_bp` sous `/students`) et `main.py`."
+        duree: 360
+        grille:
+          - {critere: "`app.config['DATABASE_PATH'] = os.path.join(app.root_path, 'school.db')`", points: 1}
+          - {critere: "`app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + app.config['DATABASE_PATH']`", points: 1}
+          - {critere: "Import des blueprints dans la fonction + `register_blueprint(..., url_prefix='/students')`", points: 1.5}
+          - {critere: "`main.py` : `app = create_app()` + `if __name__ == '__main__': app.run(port=8000, debug=True)`", points: 1.5}
+        solution: |
+          # app/__init__.py
+          import os
+          from flask import Flask
+
+
+          def create_app():
+              app = Flask(__name__, static_url_path='/static')
+              app.config['DATABASE_PATH'] = os.path.join(app.root_path, 'school.db')
+              app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + app.config['DATABASE_PATH']
+              app.secret_key = 'school-secret'
+
+              from app.blueprints import index_bp, students_bp
+              app.register_blueprint(index_bp)
+              app.register_blueprint(students_bp, url_prefix='/students')
+              return app
+
+
+          # main.py
+          from app import create_app
+
+          app = create_app()
+
+          if __name__ == '__main__':
+              app.run(host="localhost", port=8000, debug=True)
+      - type: papier
+        tags: [mvcs, service, dao]
+        enonce: "Question de cours : pour la fonctionnalité « classement d'une classe », décris le trajet complet d'une requête `GET /students/ranking/BUT3-A` à travers les couches MVC-S, en nommant les méthodes."
+        duree: 300
+        grille:
+          - {critere: "Blueprint : la route `ranking(classe)` reçoit `'BUT3-A'` et appelle le service", points: 1}
+          - {critere: "Service : `getClassRanking` contient la logique métier (filtre, tri)", points: 1}
+          - {critere: "DAO : `findByClasse` interroge la base (jointure + chargement des notes), session fermée", points: 1}
+          - {critere: "Modèle : la `@property average` calcule la moyenne de chaque élève ; réponse `jsonify` (ou template)", points: 1}
+        solution: |
+          1. Le blueprint students (routes.py) : @students_bp.route('/ranking/<string:classe>') reçoit classe='BUT3-A'
+             et instancie SchoolService.
+          2. Le service : getClassRanking('BUT3-A') appelle self.sdao.findByClasse('BUT3-A'), garde les élèves qui
+             ont une moyenne, construit les tuples (nom, moyenne) et trie par moyenne décroissante.
+          3. Le DAO : findByClasse ouvre une session, fait _query_with_relations(session).join(Student.classe)
+             .filter(Classe.name == 'BUT3-A').all() (joinedload classe, selectinload grades), ferme la session.
+          4. Le modèle : Student.average (@property) calcule la moyenne à partir de self.grades.
+          5. Retour au blueprint : jsonify(classement) (ou render_template pour une vue Jinja).
+
+  # ===================================================================== BONUS (hors contrôle)
+  - id: "3.B1"
+    palier: 5
+    bonus: 1
+    title: "Bonus hors contrôle : Jinja en 5 minutes"
+    memo: |
+      Ces notions ne sont **pas au contrôle**. Elles servent seulement à comprendre les templates du cours.
+      - `{% extends 'layout.html' %}` + `{% block content %}...{% endblock %}` : l'héritage de template.
+      - `{% include 'nav.html' %}` insère un fragment.
+      - `{{ data["firstname"]|capitalize }}` : une variable, puis un filtre après la barre verticale.
+      - `{% for m in movies %}...{% endfor %}`, `{% if ... %}...{% endif %}` : les instructions.
+      - `{{ url_for('movies.moviesByYear', myear=1999) }}` : des liens sans URL codée en dur.
+    example: |
+      {% extends 'layout.html' %}
+      {% block content %}
+        <h1>{{ data["firstname"]|capitalize }} {{ data["lastname"]|upper }}</h1>
+        {% for movie in movies %}
+          <a href="{{ url_for('movies.movieView', movie_id=movie.id) }}">{{ movie.title }}</a>
+        {% endfor %}
+      {% endblock %}
+    exercises:
+      - type: qcm
+        tags: [jinja]
+        enonce: "Quelle balise insère le contenu d'une page dans le `layout.html` commun ?"
+        choices: ["`{% extends 'layout.html' %}` + `{% block content %}`", "`{% include 'layout.html' %}`", "`{{ layout }}`", "`{% import layout %}`"]
+        answer: 0
+      - type: trous
+        tags: [jinja]
+        enonce: "Complète la boucle sur les films."
+        code: |
+          {% [[0]] movie in movies %}
+            <li>{{ movie.[[1]] }}</li>
+          {% [[2]] %}
+        blanks: [["for"], ["title"], ["endfor"]]
+      - type: qcm
+        tags: [jinja]
+        enonce: "Que produit `{{ 'gaël'|capitalize }}` ?"
+        choices: ["`Gaël`", "`GAËL`", "`gaël`", "Une erreur"]
+        answer: 0
+      - type: vf
+        tags: [jinja]
+        enonce: "Jinja fait partie du périmètre du contrôle."
+        answer: false
+        explication: "Faux : Jinja est hors contrôle, de même que la gestion des utilisateurs."
+
+  - id: "3.B2"
+    palier: 5
+    bonus: 1
+    title: "Bonus hors contrôle : gestion des utilisateurs"
+    memo: |
+      Ces notions ne sont **pas au contrôle**. Elles sont là pour la culture.
+      - La session Flask (un cookie signé avec `app.secret_key`) : `session['logged'] = True`, `session['username'] = ...`.
+      - Les mots de passe sont **chiffrés** (bcrypt) : `bcrypt.hashpw(pwd.encode(), bcrypt.gensalt())`, puis `bcrypt.checkpw(...)`.
+      - Le décorateur maison `reqlogged` redirige vers la page de login si l'utilisateur n'est pas connecté.
+      - Les mixins classiques des bibliothèques : `UserMixin` (Flask-Login).
+    example: |
+      from functools import wraps
+      from flask import session, redirect, url_for
+
+      def reqlogged(f):
+          @wraps(f)
+          def wrap(*args, **kwargs):
+              if not session.get('logged'):
+                  return redirect(url_for('auth.login'))
+              return f(*args, **kwargs)
+          return wrap
+    exercises:
+      - type: qcm
+        tags: [utilisateurs]
+        enonce: "Pourquoi ne jamais enregistrer un mot de passe en clair ?"
+        choices: ["En cas de fuite de la base, les mots de passe seraient lisibles", "Parce que SQLite ne stocke pas le texte", "Parce que Flask l'interdit", "Pour économiser de la place"]
+        answer: 0
+      - type: qcm
+        tags: [utilisateurs]
+        enonce: "Sur quoi repose la session Flask (`from flask import session`) ?"
+        choices: ["Un cookie signé avec `app.secret_key`", "Une table SQL `sessions`", "La session ORM SQLAlchemy", "Un fichier sur le disque du client"]
+        answer: 0
+      - type: vf
+        tags: [utilisateurs]
+        enonce: "Le décorateur `reqlogged` est au programme du contrôle."
+        answer: false
+      - type: ordre
+        tags: [utilisateurs]
+        enonce: "Remets dans l'ordre le décorateur `reqlogged`."
+        lines:
+          - "def reqlogged(f):"
+          - "    @wraps(f)"
+          - "    def wrap(*args, **kwargs):"
+          - "        if not session.get('logged'):"
+          - "            return redirect(url_for('auth.login'))"
+          - "        return f(*args, **kwargs)"
+          - "    return wrap"

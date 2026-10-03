@@ -1,0 +1,111 @@
+{# un exercice ; variables : ex (vue sans réponses), idx, count, mode #}
+{% set labels = {'qcm': 'QCM', 'trous': 'Code à trous', 'ordre': 'Remettre dans l\'ordre', 'relier': 'Relier', 'bug': 'Trouver le bug', 'code': 'Écrire du code', 'papier': 'Mode papier'} %}
+<section class="card-app exercise mb-3" id="ex-{{ ex.id }}" data-id="{{ ex.id }}" data-type="{{ ex.type }}"
+	data-duree="{{ ex.duree or '' }}" aria-labelledby="ex-title-{{ ex.id }}"
+	{% if mode != 'exam' and idx > 0 %}hidden{% endif %}>
+	<header class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+		<h2 id="ex-title-{{ ex.id }}" class="ex-type m-0">Exercice {{ idx + 1 }}/{{ count }} · {{ labels[ex.type] }}{% if mode == 'exam' %} · {{ '%g'|format(ex.points) }} pt{{ 's' if ex.points > 1 }}{% endif %}</h2>
+		<div class="d-flex flex-wrap gap-1 align-items-center">
+			{% if ex.type == 'papier' and ex.duree and mode != 'exam' %}<span class="timer small me-2" data-timer aria-live="off">⏱ <span>{{ (ex.duree // 60) }}:00</span></span>{% endif %}
+			{% for t in ex.tags %}<span class="tag">{{ t }}</span>{% endfor %}
+		</div>
+	</header>
+	<div class="enonce mb-3">{{ ex.enonce|md }}</div>
+
+	{% if ex.type == 'qcm' %}
+		{% if ex.code %}<pre class="code-block mb-3"><code class="language-python">{{ ex.code }}</code></pre>{% endif %}
+		<fieldset>
+			<legend class="visually-hidden">Choix de réponse</legend>
+			{% if ex.multiple %}<p class="small text-muted-2 mb-2">Plusieurs réponses possibles.</p>{% endif %}
+			{% for c in ex.choices %}
+			<label class="choice" data-choice="{{ loop.index0 }}">
+				<input type="{{ 'checkbox' if ex.multiple else 'radio' }}" name="q-{{ ex.id }}" value="{{ loop.index0 }}" class="form-check-input">
+				<span>{{ c|md }}</span>
+			</label>
+			{% endfor %}
+		</fieldset>
+
+	{% elif ex.type == 'trous' %}
+		<pre class="code-block trous mb-0">{% for seg in ex.segments %}{% if seg is number %}<input type="text" data-blank="{{ seg }}" aria-label="Trou {{ seg + 1 }}" autocomplete="off" autocapitalize="off" spellcheck="false" size="10">{% else %}{{ seg }}{% endif %}{% endfor %}</pre>
+
+	{% elif ex.type == 'ordre' %}
+		<p class="small text-muted-2 mb-2">Glisse les lignes, ou utilise les flèches ↑ ↓.</p>
+		<ol class="ordre">
+			{% for i, line in ex.lines %}
+			<li draggable="true" data-orig="{{ i }}">
+				<code>{{ line }}</code>
+				<button type="button" class="btn btn-sm btn-outline-secondary mv" data-move="-1" aria-label="Monter la ligne">↑</button>
+				<button type="button" class="btn btn-sm btn-outline-secondary mv" data-move="1" aria-label="Descendre la ligne">↓</button>
+			</li>
+			{% endfor %}
+		</ol>
+
+	{% elif ex.type == 'relier' %}
+		{% for notion in ex.notions %}
+		<div class="relier-row">
+			<label for="rel-{{ ex.id }}-{{ loop.index0 }}" class="fw-semibold">{{ notion|md }}</label>
+			<select class="form-select" id="rel-{{ ex.id }}-{{ loop.index0 }}" data-notion="{{ loop.index0 }}">
+				<option value="">— choisir —</option>
+				{% for j, d in ex.definitions %}<option value="{{ j }}">{{ d }}</option>{% endfor %}
+			</select>
+		</div>
+		{% endfor %}
+
+	{% elif ex.type == 'bug' %}
+		<p class="small text-muted-2 mb-2">Clique sur {{ 'la ligne fautive' if ex.nb_bugs == 1 else 'les ' ~ ex.nb_bugs ~ ' lignes fautives' }}, puis corrige-{{ 'la' if ex.nb_bugs == 1 else 'les' }} dans le champ qui apparaît.</p>
+		<ol class="bug-lines">
+			{% for line in ex.lines %}
+			<li><button type="button" class="bug-line" data-line="{{ loop.index }}" aria-pressed="false">{{ line }}</button></li>
+			{% endfor %}
+		</ol>
+		<div class="bug-fixes mt-2"></div>
+
+	{% elif ex.type == 'code' %}
+		<label class="visually-hidden" for="code-{{ ex.id }}">Ton code</label>
+		<textarea class="code-editor" id="code-{{ ex.id }}" data-cm spellcheck="false">{{ ex.starter }}</textarea>
+
+	{% elif ex.type == 'papier' %}
+		<p class="small text-muted-2 mb-2">Comme sur ta copie : pas de coloration, pas d'autocomplétion.</p>
+		<label class="visually-hidden" for="paper-{{ ex.id }}">Ta copie</label>
+		<textarea class="code-editor paper" id="paper-{{ ex.id }}" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" rows="16">{{ ex.starter }}</textarea>
+		<div class="papier-correction mt-3" hidden>
+			<div class="row g-3">
+				<div class="col-lg-6">
+					<h3 class="h6 fw-bold">Corrigé</h3>
+					<pre class="code-block"><code class="language-python" data-solution></code></pre>
+				</div>
+				<div class="col-lg-6">
+					<h3 class="h6 fw-bold">Grille de barème</h3>
+					<p class="small text-muted-2" data-papier-msg></p>
+					<div class="grille">
+						{% for c in ex.grille %}
+						<label data-crit="{{ loop.index0 }}"><input type="checkbox" class="form-check-input mt-1" value="{{ loop.index0 }}"> <span>{{ c|md }}</span></label>
+						{% endfor %}
+					</div>
+					<button type="button" class="btn btn-primary mt-2" data-action="selfeval">Valider mon auto-évaluation</button>
+				</div>
+			</div>
+		</div>
+	{% endif %}
+
+	{% for h in ex.indices %}<template data-hint>{{ h }}</template>{% endfor %}
+	<div class="hints"></div>
+
+	<div class="d-flex flex-wrap gap-2 mt-3 actions">
+		{% if ex.indices and mode != 'exam' %}
+		<button type="button" class="btn btn-outline-secondary" data-action="hint">Indice <span class="small">(−20 %, {{ ex.indices|length }} dispo)</span></button>
+		{% endif %}
+		{% if ex.type == 'papier' %}
+		<button type="button" class="btn btn-primary" data-action="paper" {% if mode == 'exam' %}hidden{% endif %}>Rendre ma copie</button>
+		{% elif ex.type == 'code' %}
+		<button type="button" class="btn btn-primary" data-action="check">Lancer les tests</button>
+		<button type="button" class="btn btn-outline-secondary" data-action="giveup">Voir le corrigé</button>
+		{% else %}
+		<button type="button" class="btn btn-primary" data-action="check" {% if mode == 'exam' %}hidden{% endif %}>Valider</button>
+		{% endif %}
+		<button type="button" class="btn btn-outline-secondary" data-action="explain" hidden>Voir l'explication</button>
+		{% if mode != 'exam' %}<button type="button" class="btn btn-outline-primary ms-auto" data-action="next">Suivant →</button>{% endif %}
+	</div>
+	<div class="feedback-area mt-3" aria-live="polite"></div>
+	<div class="explain-area mt-2" hidden></div>
+</section>

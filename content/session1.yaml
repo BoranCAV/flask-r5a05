@@ -1,0 +1,2044 @@
+session:
+  id: 1
+  title: "Flask modulaire"
+  subtitle: "MVC-S, packages, application factory, blueprints, routes, modèle, DAO sqlite3 et service typé."
+
+lessons:
+  # ===================================================================== PALIER 1
+  - id: "1.1"
+    palier: 1
+    title: "MVC-S : qui fait quoi ?"
+    memo: |
+      - **Model** : représente les données (classe `Movie`), sans aucun traitement.
+      - **DAO** (Data Access Object) : centralise l'accès à la base (SQL ou ORM) et convertit les lignes en objets.
+      - **Service** : la logique métier (ex. `getMoviesYears`). Il est appelé par les contrôleurs et ne dépend pas du type de stockage, d'où l'usage de types.
+      - **Controller** : les routes. En Flask modulaire, ce sont les **blueprints** : plus de dossier `controllers`.
+      - **View** : les templates Jinja (présentation).
+      - Flux d'une requête : blueprint → service → DAO → base, puis retour vers la vue.
+      - L'**interface** du DAO (`MovieDAOInterface`) fixe les méthodes : on peut changer d'implémentation (sqlite3 → ORM) sans toucher au service.
+    example: |
+      # blueprint (contrôleur) : reçoit la requête, appelle le service, renvoie la vue
+      @movies_bp.route('/year', methods=['GET'])
+      def moviesByYear():
+          ms = MovieService()                       # service : logique métier
+          year = int(request.args.get('myear'))     # entrée lue dans l'URL
+          movies = ms.getMoviesByYear(year)         # le service appelle le DAO
+          return render_template('movies_view.html', movies=movies)  # vue
+    exercises:
+      - type: qcm
+        tags: [mvcs, service]
+        enonce: "Dans quelle couche place-t-on la méthode `getMoviesYears()` qui calcule la liste triée des années disponibles ?"
+        choices: ["Model", "DAO", "Service", "Blueprint (contrôleur)"]
+        answer: 2
+        indices: ["C'est de la logique métier : un calcul à partir des données, pas un accès direct à la base."]
+        explication: "Le service contient la logique métier. Il demande les films au DAO puis calcule les années distinctes. Le DAO, lui, ne fait que lire la base."
+      - type: qcm
+        tags: [mvcs, dao]
+        enonce: "Où écrit-on la requête `SELECT id, title FROM movies WHERE year = ?` ?"
+        choices: ["Dans le blueprint", "Dans le DAO", "Dans le service", "Dans le template"]
+        answer: 1
+        explication: "Le DAO est le seul composant qui parle à la base : il isole le stockage du reste de l'application."
+      - type: vf
+        tags: [mvcs, service]
+        enonce: "Le service doit savoir si les données viennent de SQLite, d'un fichier JSON ou d'un ORM."
+        answer: false
+        explication: "Faux : le service ne dépend pas du type de données. Il passe par le DAO, et l'interface du DAO masque le stockage."
+      - type: vf
+        tags: [mvcs, blueprint]
+        enonce: "Dans l'architecture du cours, les blueprints remplacent le dossier `controllers`."
+        answer: true
+        explication: "Vrai : chaque blueprint porte ses propres routes (`@bp.route`). Ce sont les contrôleurs de l'application modulaire."
+      - type: relier
+        tags: [mvcs]
+        enonce: "Relie chaque couche à son rôle."
+        pairs:
+          - ["Model", "Représente les données manipulées, sans traitement"]
+          - ["DAO", "Lit et écrit dans la base, convertit les lignes en objets"]
+          - ["Service", "Contient la logique métier et orchestre les DAO"]
+          - ["Blueprint", "Reçoit la requête HTTP et choisit la réponse"]
+          - ["Template Jinja", "Met en forme la réponse HTML"]
+        explication: "C'est le découpage MVC-S du cours : Model, (DAO), Service, Controller, View."
+      - type: ordre
+        tags: [mvcs]
+        enonce: "Remets dans l'ordre le trajet d'une requête `GET /movies/year?myear=1999`."
+        lines:
+          - "Le navigateur envoie la requête GET"
+          - "Le blueprint movies lit request.args.get('myear')"
+          - "Le service MovieService applique la logique métier"
+          - "Le DAO interroge la base de données"
+          - "Le blueprint renvoie render_template(...) avec les films"
+        explication: "Requête → contrôleur (blueprint) → service → DAO → base, puis la réponse remonte jusqu'à la vue."
+      - type: trous
+        tags: [dao-interface, mvcs]
+        enonce: "Complète la déclaration du DAO sqlite3, qui implémente l'interface du cours."
+        code: |
+          class MovieSqliteDAO([[0]]):
+              """DAO des films (sqlite3)"""
+        blanks: [["MovieDAOInterface"]]
+        indices: ["Le nom de l'interface est celui du fichier `MovieDAOInterface.py`."]
+        explication: "La classe concrète hérite de l'interface : elle doit fournir `connect`, `findAll`, `findById`, `findByYear`…"
+
+  - id: "1.2"
+    palier: 1
+    title: "Modules, packages et __init__.py"
+    memo: |
+      - **Module** : un fichier `.py`. Par exemple `base.py`, qui contient `Base`, `BaseModelMixin` et `get_engine()`.
+      - **Package** : un dossier qui contient un fichier `__init__.py` (ex. `app/`, `app/blueprints/`).
+      - `__init__.py` s'exécute à l'import du package. On s'en sert pour réexporter : `from .routes import index_bp`.
+      - `__all__ = ['index_bp']` liste les noms publics, ceux qu'importe `from package import *`.
+      - Arborescence du cours : `app/blueprints/`, `app/models/`, `app/services/`, `app/static/`, `app/templates/`, avec `main.py` à la racine.
+      - Un blueprint est un sous-package : `blueprints/movies/__init__.py`, `routes.py`, `templates/`.
+      - `blueprints/__init__.py` réexporte tous les blueprints pour la factory.
+    example: |
+      # arborescence du TD01
+      # TD01/
+      # ├── main.py                 → create_app() + app.run(port=8000)
+      # └── app/                    → package principal
+      #     ├── __init__.py         → def create_app()
+      #     ├── blueprints/
+      #     │   ├── __init__.py     → réexporte index_bp, movies_bp…
+      #     │   └── movies/
+      #     │       ├── __init__.py → from .routes import movies_bp
+      #     │       ├── routes.py   → movies_bp = Blueprint(...)
+      #     │       └── templates/movies_view.html
+      #     ├── models/             → Movie.py, MovieDAO.py, MovieDAOInterface.py
+      #     └── services/           → MovieService.py
+
+      # app/blueprints/movies/__init__.py
+      from .routes import movies_bp
+
+      __all__ = ['movies_bp']
+    exercises:
+      - type: qcm
+        tags: [module-package]
+        enonce: "Qu'est-ce qui fait d'un dossier un **package** Python ?"
+        choices: ["La présence d'un fichier `__init__.py`", "La variable `__all__`", "Un fichier `main.py`", "Un fichier `routes.py`"]
+        answer: 0
+        explication: "Un package est un dossier avec un `__init__.py`. Ce fichier est exécuté à l'import et peut contrôler ce que le package expose."
+      - type: vf
+        tags: [module-package]
+        enonce: "Le fichier `base.py`, qui contient une classe, une variable globale `Base` et une fonction `get_engine()`, est un module."
+        answer: true
+        explication: "Vrai : un module est un simple fichier `.py`, qui peut contenir des classes, des variables et des fonctions."
+      - type: qcm
+        tags: [init-all]
+        enonce: "À quoi sert `__all__ = ['index_bp']` dans un `__init__.py` ?"
+        choices:
+          - "À lister les noms exportés par `from package import *`"
+          - "À enregistrer le blueprint dans l'application"
+          - "À rendre `index_bp` privé"
+          - "À créer le dossier templates"
+        answer: 0
+        explication: "`__all__` définit l'interface publique du module ou du package. L'enregistrement, lui, se fait avec `app.register_blueprint`."
+      - type: trous
+        tags: [init-all, blueprint]
+        enonce: "Complète `app/blueprints/movies/__init__.py`."
+        code: |
+          from [[0]] import movies_bp
+
+          __all__ = [[[1]]]
+        blanks:
+          - [".routes", "app.blueprints.movies.routes"]
+          - ["'movies_bp'"]
+        indices: ["L'import est relatif au package courant : le point désigne le dossier `movies/`."]
+        explication: "Le `__init__.py` du blueprint importe l'objet depuis `routes.py` et l'exporte via `__all__`, sous forme de chaîne."
+      - type: relier
+        tags: [arborescence]
+        enonce: "Relie chaque fichier à son rôle."
+        pairs:
+          - ["main.py", "Crée l'application et la lance sur le port 8000"]
+          - ["app/__init__.py", "Contient la fonction create_app()"]
+          - ["app/blueprints/__init__.py", "Réexporte tous les blueprints"]
+          - ["app/blueprints/movies/routes.py", "Déclare movies_bp et ses routes"]
+          - ["app/models/Movie.py", "Classe représentant un film"]
+      - type: qcm
+        tags: [module-package]
+        enonce: "Lesquels sont des **packages** (on suppose que chaque dossier contient un `__init__.py`) ?"
+        choices: ["`app/`", "`app/models/`", "`app/models/base.py`", "`main.py`"]
+        answer: [0, 1]
+        explication: "Les dossiers avec `__init__.py` sont des packages. Les fichiers `.py` sont des modules."
+      - type: bug
+        tags: [init-all]
+        enonce: "Ce `app/blueprints/__init__.py` contient une erreur. Trouve-la et corrige-la."
+        code: |
+          from app.blueprints.index import index_bp
+          from app.blueprints.movies import movies_bp
+
+          __all__ = [
+              'index_bp',
+              movies_bp,
+          ]
+        fixes:
+          6: ["'movies_bp',"]
+        explication: "`__all__` contient des **noms** (chaînes de caractères), pas les objets eux-mêmes."
+
+  - id: "1.3"
+    palier: 1
+    title: "L'application factory"
+    memo: |
+      - `create_app()`, dans `app/__init__.py`, crée l'application, la configure et la retourne : c'est l'**application factory**.
+      - `app = Flask(__name__, static_url_path='/static')`
+      - Configuration : `app.config['DATABASE_PATH'] = os.path.join(app.root_path, 'movies.db')`, `app.secret_key = '...'`.
+      - Les blueprints sont importés **dans** la fonction puis enregistrés (`app.register_blueprint(index_bp)`). Ça évite les imports circulaires.
+      - `main.py` : `app = create_app()` puis `app.run(host="localhost", port=8000, debug=True)` sous `if __name__ == '__main__':`.
+      - Avant, avec un module unique : `app = Flask(__name__)` dans le contexte global et `@app.route` partout.
+    example: |
+      import os
+      from flask import Flask
+
+
+      def create_app():
+          """application factory : crée, configure et retourne l'app"""
+          app = Flask(__name__, static_url_path='/static')
+          # configuration de la base de données
+          app.config['DATABASE_PATH'] = os.path.join(app.root_path, 'movies.db')
+          app.secret_key = 'ma cle secrete unique'
+
+          # import DANS la fonction pour éviter les imports circulaires
+          from app.blueprints import index_bp, movies_bp
+          app.register_blueprint(index_bp)
+          app.register_blueprint(movies_bp, url_prefix='/movies')
+          return app
+    exercises:
+      - type: qcm
+        tags: [factory, arborescence]
+        enonce: "Dans quel fichier le cours définit-il `create_app()` ?"
+        choices: ["`main.py`", "`app/__init__.py`", "`app/blueprints/__init__.py`", "`app/services/__init__.py`"]
+        answer: 1
+        explication: "La factory est dans `app/__init__.py`, ce qui permet `from app import create_app` dans `main.py`."
+      - type: qcm
+        tags: [factory]
+        enonce: "Pourquoi importe-t-on les blueprints **à l'intérieur** de `create_app()` ?"
+        choices:
+          - "Pour éviter les imports circulaires entre `app` et les blueprints"
+          - "Parce que Python interdit les imports en haut de fichier"
+          - "Pour que Jinja trouve les templates"
+          - "Pour accélérer les requêtes"
+        answer: 0
+        explication: "Les blueprints importent des services, qui peuvent importer `app`. Importer dans la fonction retarde l'import jusqu'à l'appel de la factory."
+      - type: trous
+        tags: [main, factory]
+        enonce: "Complète `main.py`."
+        code: |
+          from app import [[0]]
+
+          app = create_app()
+
+          if __name__ == [[1]]:
+              app.run(host="localhost", port=[[2]], debug=True)
+        blanks:
+          - ["create_app"]
+          - ["'__main__'"]
+          - ["8000"]
+        explication: "`main.py` importe la factory, crée l'app, puis la lance seulement si le fichier est exécuté directement."
+      - type: ordre
+        tags: [factory]
+        enonce: "Remets dans l'ordre la factory minimale du cours."
+        lines:
+          - "def create_app():"
+          - "    app = Flask(__name__, static_url_path='/static')"
+          - "    app.config['DATABASE_PATH'] = os.path.join(app.root_path, 'movies.db')"
+          - "    from app.blueprints import movies_bp"
+          - "    app.register_blueprint(movies_bp, url_prefix='/movies')"
+          - "    return app"
+        explication: "On crée l'app, on la configure, on importe puis on enregistre les blueprints, et on la retourne."
+      - type: vf
+        tags: [factory]
+        enonce: "`create_app()` doit se terminer par `return app`."
+        answer: true
+        explication: "Vrai : sans `return app`, `main.py` récupérerait `None`."
+      - type: qcm
+        tags: [factory, config]
+        enonce: "Que vaut `app.root_path` quand l'app est créée dans `app/__init__.py` avec `Flask(__name__)` ?"
+        choices: ["Le dossier du package `app/`", "Le dossier où se trouve `main.py`", "Le dossier `static/`", "Le dossier personnel de l'utilisateur"]
+        answer: 0
+        explication: "`root_path` est le dossier du module passé à `Flask(__name__)`, ici `app/`. D'où `os.path.join(app.root_path, 'movies.db')` → `app/movies.db`."
+
+  # ===================================================================== PALIER 2
+  - id: "1.4"
+    palier: 2
+    title: "Créer et enregistrer un blueprint"
+    memo: |
+      - `movies_bp = Blueprint('movies', __name__, template_folder='templates')`, dans `blueprints/movies/routes.py`.
+      - 1er argument : le nom interne du blueprint, utilisé par `url_for('movies.movies')`. 2e argument : `__name__` (le module courant).
+      - Les routes se déclarent sur le blueprint (`@movies_bp.route('/')`), plus sur `app`.
+      - Enregistrement dans la factory : `app.register_blueprint(movies_bp, url_prefix='/movies')`.
+      - `url_prefix` peut aussi se donner à `Blueprint(...)`. S'il est donné aux deux endroits, celui de `register_blueprint` l'emporte.
+      - URL finale = préfixe + chemin de la route : `/movies` + `/year` → `/movies/year`.
+      - `template_folder='templates'` : le blueprint a ses propres templates.
+      - Sans `register_blueprint`, ses routes n'existent pas (erreur 404).
+    example: |
+      # app/blueprints/movies/routes.py
+      from flask import Blueprint, render_template
+      from app.services.MovieService import MovieService
+
+      movies_bp = Blueprint('movies', __name__, template_folder="templates")
+
+
+      @movies_bp.route('/', methods=['GET'])     # → /movies/ une fois enregistré
+      def movies():
+          ms = MovieService()
+          return render_template('movies_view.html', movies=ms.getAllMovies())
+
+      # dans create_app() :
+      # app.register_blueprint(movies_bp, url_prefix='/movies')
+    exercises:
+      - type: trous
+        tags: [blueprint, template-folder]
+        enonce: "Complète la création du blueprint `movies` et de sa première route."
+        code: |
+          movies_bp = [[0]]('movies', [[1]], template_folder=[[2]])
+
+
+          @[[3]].route('/', methods=['GET'])
+          def movies():
+              return "liste des films"
+        blanks:
+          - ["Blueprint"]
+          - ["__name__"]
+          - ["'templates'"]
+          - ["movies_bp"]
+        explication: "On instancie `Blueprint(nom, __name__, ...)` puis on décore les fonctions avec `@movies_bp.route`."
+      - type: trous
+        tags: [register-bp, url-prefix]
+        enonce: "Complète l'enregistrement dans `create_app()` pour que les routes soient servies sous `/movies`."
+        code: |
+          from app.blueprints import movies_bp
+          app.[[0]](movies_bp, [[1]]='/movies')
+        blanks:
+          - ["register_blueprint"]
+          - ["url_prefix"]
+      - type: qcm
+        tags: [url-prefix, route-params]
+        enonce: "La route `@movies_bp.route('/year')` appartient à un blueprint enregistré avec `url_prefix='/movies'`. Quelle URL l'atteint ?"
+        choices: ["`/movies/year`", "`/year`", "`/movies_bp/year`", "`/year/movies`"]
+        answer: 0
+        explication: "L'URL finale combine le préfixe du blueprint et le chemin de la route."
+      - type: ordre
+        tags: [blueprint, register-bp, init-all]
+        enonce: "Remets dans l'ordre les étapes pour ajouter un blueprint `infos` à l'application."
+        lines:
+          - "Créer le dossier app/blueprints/infos/"
+          - "Écrire infos_bp = Blueprint('infos', __name__) dans infos/routes.py"
+          - "Déclarer @infos_bp.route('/') et sa fonction"
+          - "Exporter infos_bp dans infos/__init__.py avec __all__"
+          - "Réexporter infos_bp dans app/blueprints/__init__.py"
+          - "Appeler app.register_blueprint(infos_bp, url_prefix='/infos') dans create_app()"
+      - type: ordre
+        tags: [blueprint]
+        enonce: "Remets dans l'ordre le fichier `infos/routes.py`."
+        lines:
+          - "from flask import Blueprint, render_template"
+          - "infos_bp = Blueprint('infos', __name__, template_folder='templates')"
+          - "@infos_bp.route('/', methods=['GET'])"
+          - "def infos():"
+          - "    return render_template('infos.html', data={'firstname': 'gaël'})"
+      - type: relier
+        tags: [blueprint, url-prefix, template-folder]
+        enonce: "Relie chaque élément de `Blueprint('movies', __name__, url_prefix='/movies', template_folder='templates')` à son rôle."
+        pairs:
+          - ["'movies'", "Nom interne, utilisé dans url_for('movies.…')"]
+          - ["__name__", "Module dans lequel le blueprint est défini"]
+          - ["url_prefix", "Préfixe ajouté devant toutes les routes du blueprint"]
+          - ["template_folder", "Dossier des templates propres au blueprint"]
+      - type: qcm
+        tags: [register-bp]
+        enonce: "On a créé `movies_bp` et ses routes, mais on a oublié `app.register_blueprint(movies_bp)`. Que se passe-t-il sur `/movies/` ?"
+        choices: ["Erreur 404 : la route n'existe pas", "Erreur 500", "La page s'affiche quand même", "Flask enregistre le blueprint automatiquement"]
+        answer: 0
+        explication: "Un blueprint n'est rattaché à l'application qu'au moment de `register_blueprint`. Avant ça, ses routes n'existent pas."
+
+  - id: "1.5"
+    palier: 2
+    title: "Routes, méthodes et paramètres"
+    memo: |
+      - `@bp.route('/', methods=['GET'])` : par défaut, seule la méthode GET est acceptée. On ajoute `'POST'` pour un formulaire.
+      - Convertisseurs : `<int:movie_id>` (entier), `<string:city_name>` (texte, le défaut). La valeur arrive en paramètre de la fonction.
+      - Query string `?myear=1999` → `request.args.get('myear')`, qui renvoie `None` si le paramètre est absent. C'est toujours une **chaîne** : on convertit avec `int(...)`.
+      - Formulaire POST → `request.form['index']` (KeyError si absent) ou `request.form.get('index')`.
+      - `from flask import request`. `request.method` vaut `'GET'` ou `'POST'`.
+      - Une même fonction peut avoir plusieurs décorateurs `@bp.route`.
+    example: |
+      @movies_bp.route('/<int:movie_id>', methods=['GET'])
+      def movieView(movie_id):                     # movie_id est déjà un int
+          movie_data = MovieService().getMovieById(movie_id)
+          return render_template('movies_view.html', movies=movie_data)
+
+
+      @movies_bp.route('/year', methods=['GET'])
+      def moviesByYear():                          # /movies/year?myear=1999
+          year = int(request.args.get('myear'))    # chaîne → int
+          return render_template('movies_view.html', movies=MovieService().getMoviesByYear(year))
+
+
+      @movies_bp.route('/', methods=['POST'])
+      def movieByIndex():                          # formulaire avec un champ "index"
+          movie_id = int(request.form['index'])
+          return render_template('movies_view.html', movies=MovieService().getMovieById(movie_id))
+    exercises:
+      - type: trous
+        tags: [route-params]
+        enonce: "Complète la route pour que `/movies/42` appelle `movieView(42)` avec un entier."
+        code: |
+          @movies_bp.route('/[[0]]', methods=['GET'])
+          def movieView(movie_id):
+              return MovieService().getMovieById(movie_id)
+        blanks: [["<int:movie_id>"]]
+        indices: ["Syntaxe : `<convertisseur:nom_du_paramètre>`."]
+      - type: trous
+        tags: [request-args]
+        enonce: "Complète la lecture du paramètre `myear` de l'URL `/movies/year?myear=1999`."
+        code: |
+          @movies_bp.route('/year', methods=['GET'])
+          def moviesByYear():
+              year = [[0]](request.[[1]].get('myear'))
+              return render_template('movies_view.html', movies=MovieService().getMoviesByYear(year))
+        blanks:
+          - ["int"]
+          - ["args"]
+        explication: "`request.args` contient la query string. Ses valeurs sont des chaînes, d'où `int(...)`."
+      - type: qcm
+        tags: [request-args]
+        enonce: "Pour l'URL `/movies/year?myear=1999`, que renvoie `request.args.get('myear')` ?"
+        choices: ["`'1999'` (une chaîne)", "`1999` (un entier)", "`None`", "`['1999']`"]
+        answer: 0
+        explication: "Les paramètres d'URL arrivent toujours sous forme de chaînes. `get` renverrait `None` si `myear` était absent."
+      - type: ordre
+        tags: [request-form, route-methods]
+        enonce: "Remets dans l'ordre la route qui reçoit un formulaire POST avec un champ `index`."
+        lines:
+          - "@movies_bp.route('/', methods=['POST'])"
+          - "def movieByIndex():"
+          - "    movie_id = int(request.form['index'])"
+          - "    movie_data = MovieService().getMovieById(movie_id)"
+          - "    return render_template('movies_view.html', movies=movie_data)"
+      - type: ordre
+        tags: [route-params, jsonify]
+        enonce: "Remets dans l'ordre ce petit fichier d'API JSON."
+        lines:
+          - "from flask import Blueprint, jsonify"
+          - "api_bp = Blueprint('api', __name__)"
+          - "@api_bp.route('/movies/<int:movie_id>', methods=['GET'])"
+          - "def movie_json(movie_id):"
+          - "    movie = MovieService().getMovieById(movie_id)"
+          - "    return jsonify(movie[0].to_dict())"
+      - type: relier
+        tags: [route-params, request-args, request-form, route-methods]
+        enonce: "Relie chaque syntaxe à l'endroit d'où vient la donnée."
+        pairs:
+          - ["<int:movie_id>", "Un morceau du chemin de l'URL, converti en entier"]
+          - ["request.args", "Les paramètres après le ? dans l'URL"]
+          - ["request.form", "Les champs d'un formulaire envoyé en POST"]
+          - ["methods=['GET', 'POST']", "Les méthodes HTTP acceptées par la route"]
+      - type: vf
+        tags: [route-methods]
+        enonce: "Sans l'argument `methods=...`, une route accepte à la fois GET et POST."
+        answer: false
+        explication: "Faux : par défaut, une route n'accepte que GET (et HEAD). Un POST renverrait 405 Method Not Allowed."
+
+  - id: "1.6"
+    palier: 2
+    title: "Réponses et contexte : render_template, jsonify, url_for, redirect, current_app"
+    memo: |
+      - `render_template('movies_view.html', movies=movies)` : rend une vue Jinja avec des variables.
+      - `jsonify({...})` : renvoie une réponse JSON. Avec un modèle : `jsonify(movie.to_dict())`.
+      - `url_for('movies.moviesByYear', myear=1999)` construit une URL à partir du **nom du blueprint + nom de la fonction**. Les arguments inconnus deviennent des query params : `/movies/year?myear=1999`.
+      - `redirect(url_for('index.index'))` : redirection (code 302).
+      - `current_app` : l'application courante, utilisable dans un service ou un blueprint sans importer `app`. Exemple : `current_app.config['DATABASE_PATH']`.
+      - `current_app` n'existe que pendant une requête, ou dans un bloc `with app.app_context():`.
+    example: |
+      from flask import Blueprint, jsonify, redirect, url_for, request, current_app
+
+      @api_bp.route('/movies/<int:movie_id>')
+      def movie_json(movie_id):
+          movie = MovieService().getMovieById(movie_id)
+          return jsonify(movie[0].to_dict())             # réponse JSON
+
+      @movies_bp.route('/search', methods=['POST'])
+      def search():
+          year = request.form['year']
+          # 302 vers /movies/year?myear=...
+          return redirect(url_for('movies.moviesByYear', myear=year))
+
+      class MovieService:
+          def __init__(self, db_path=None):
+              if db_path is None:
+                  db_path = current_app.config['DATABASE_PATH']   # config de l'app courante
+              self.mdao = MovieSqliteDAO(db_path)
+    exercises:
+      - type: qcm
+        tags: [url-for]
+        enonce: "Quelle chaîne passer à `url_for` pour la fonction `moviesByYear` du blueprint créé avec `Blueprint('movies', __name__)` ?"
+        choices: ["`'movies.moviesByYear'`", "`'moviesByYear'`", "`'/movies/year'`", "`'movies_bp.moviesByYear'`"]
+        answer: 0
+        explication: "On écrit le nom interne du blueprint (1er argument de `Blueprint`), un point, puis le nom de la fonction. Ce n'est pas le nom de la variable `movies_bp`."
+      - type: trous
+        tags: [redirect, url-for]
+        enonce: "Après la suppression, on redirige vers la fonction `index` du blueprint `index`."
+        code: |
+          @movies_bp.route('/<int:movie_id>/delete', methods=['POST'])
+          def delete(movie_id):
+              MovieService().deleteMovie(movie_id)
+              return [[0]](url_for([[1]]))
+        blanks:
+          - ["redirect"]
+          - ["'index.index'"]
+      - type: trous
+        tags: [current-app, service]
+        enonce: "Complète le constructeur du service pour qu'il lise le chemin de la base dans la configuration de l'application courante."
+        code: |
+          from flask import [[0]]
+
+
+          class MovieService:
+              def __init__(self, db_path=None):
+                  if db_path is None:
+                      db_path = [[1]].config[[[2]]]
+                  self.mdao = MovieSqliteDAO(db_path)
+        blanks:
+          - ["current_app"]
+          - ["current_app"]
+          - ["'DATABASE_PATH'"]
+        explication: "`current_app` donne accès à l'app en cours sans l'importer depuis `main.py`, ce qui évite les imports circulaires."
+      - type: ordre
+        tags: [jsonify, modele-classique]
+        enonce: "Remets dans l'ordre la route qui renvoie les 10 premiers films en JSON."
+        lines:
+          - "@api_bp.route('/movies', methods=['GET'])"
+          - "def movies_json():"
+          - "    movies = MovieService().getAllMovies(limit=10)"
+          - "    data = [m.to_dict() for m in movies]"
+          - "    return jsonify(data)"
+      - type: ordre
+        tags: [redirect, request-form]
+        enonce: "Remets dans l'ordre la route de recherche qui redirige vers la liste filtrée."
+        lines:
+          - "@movies_bp.route('/search', methods=['POST'])"
+          - "def search():"
+          - "    year = request.form['year']"
+          - "    return redirect(url_for('movies.moviesByYear', myear=year))"
+      - type: relier
+        tags: [jsonify, redirect, url-for, current-app]
+        enonce: "Relie chaque fonction de Flask à ce qu'elle produit."
+        pairs:
+          - ["render_template", "Une page HTML générée à partir d'un template"]
+          - ["jsonify", "Une réponse JSON (API)"]
+          - ["redirect", "Une redirection HTTP 302 vers une autre URL"]
+          - ["url_for", "L'URL d'une fonction de route, à partir de son nom"]
+          - ["current_app", "L'application en cours de traitement de la requête"]
+      - type: qcm
+        tags: [url-for]
+        enonce: "La route `/year` appartient au blueprint `movies`, enregistré avec `url_prefix='/movies'`. Que renvoie `url_for('movies.moviesByYear', myear=1999)` ?"
+        choices: ["`/movies/year?myear=1999`", "`/movies/year/1999`", "`/year?myear=1999`", "Une erreur : `myear` n'est pas dans la route"]
+        answer: 0
+        explication: "Les arguments qui ne font pas partie du chemin de la route sont ajoutés en query string."
+
+  # ===================================================================== PALIER 3
+  - id: "1.7"
+    palier: 3
+    title: "Le modèle classique (domaine : bibliothèque)"
+    memo: |
+      - Un modèle représente des données **sans** traitement. Son constructeur a des valeurs par défaut à `None`.
+      - `to_dict()` retourne un dictionnaire (utile pour `jsonify`).
+      - `__getitem__(self, item)` → `getattr(self, item)` : permet d'écrire `movie['title']` comme `movie.title`, pratique en Jinja.
+      - `__contains__(self, item)` → `hasattr(self, item)` : permet de tester `'title' in movie`.
+      - `__repr__` : une représentation lisible pour `print`, par exemple `<Movie id=1 title=Matrix year=1999>`.
+      - Méthode utile : `from_dict(cls, d)` (`@classmethod`) pour créer un objet depuis une ligne SQL convertie en `dict`.
+    example: |
+      class Movie:
+          """représentation abstraite d'un film"""
+          def __init__(self, id=None, title=None, year=None):
+              self.id = id
+              self.title = title
+              self.year = year
+
+          def to_dict(self):
+              return {"id": self.id, "title": self.title, "year": self.year}
+
+          def __getitem__(self, item):        # movie['title']
+              return getattr(self, item)
+
+          def __contains__(self, item):       # 'title' in movie
+              return hasattr(self, item)
+
+          def __repr__(self):                 # print(movie)
+              return f"<Movie id={self.id} title={self.title} year={self.year}>"
+    exercises:
+      - type: qcm
+        tags: [modele-classique, dunder]
+        enonce: "Grâce à quelle méthode `book['title']` fonctionne-t-il ?"
+        choices: ["`__getitem__`", "`__contains__`", "`__repr__`", "`to_dict`"]
+        answer: 0
+        explication: "L'opérateur `[]` appelle `__getitem__`. Le cours l'implémente avec `getattr(self, item)`."
+      - type: trous
+        tags: [dunder]
+        enonce: "Complète les deux méthodes spéciales du modèle."
+        code: |
+          def __getitem__(self, item):
+              return [[0]](self, item)
+
+          def __contains__(self, item):
+              return [[1]](self, item)
+        blanks: [["getattr"], ["hasattr"]]
+      - type: bug
+        tags: [modele-classique]
+        enonce: "`to_dict()` plante avec `NameError`. Trouve la ligne fautive."
+        code: |
+          class Book:
+              def __init__(self, id=None, title=None, year=None):
+                  self.id = id
+                  self.title = title
+                  self.year = year
+
+              def to_dict(self):
+                  return {"id": self.id, "title": self.title, "year": year}
+
+              def __getitem__(self, item):
+                  return getattr(self, item)
+        fixes:
+          8: ["return {\"id\": self.id, \"title\": self.title, \"year\": self.year}"]
+        explication: "Dans une méthode, les attributs s'atteignent via `self`. `year` seul n'existe pas dans `to_dict`."
+      - type: bug
+        tags: [modele-classique, dunder]
+        enonce: "Cette classe contient **2 erreurs**. `print(Author(1, 'Herbert'))` doit afficher `<Author id=1 name=Herbert>`."
+        code: |
+          class Author:
+              def __init__(self, id=None, name=None):
+                  id = id
+                  self.name = name
+
+              def __repr__(self):
+                  print(f"<Author id={self.id} name={self.name}>")
+        fixes:
+          3: ["self.id = id"]
+          7: ["return f\"<Author id={self.id} name={self.name}>\""]
+        explication: "Sans `self.`, on crée une variable locale perdue. Et `__repr__` doit **retourner** la chaîne, pas l'afficher."
+      - type: code
+        tags: [modele-classique, dunder]
+        enonce: |
+          Écris la classe `Book` (domaine bibliothèque) :
+          - constructeur avec `id`, `title`, `year`, `author`, tous à `None` par défaut ;
+          - `to_dict()` ;
+          - `__getitem__` et `__contains__` ;
+          - `__repr__`, qui renvoie par exemple `<Book id=1 title=Dune>`.
+        starter: |
+          class Book:
+              """représentation abstraite d'un livre"""
+
+              def __init__(self):
+                  pass
+        tests: |
+          def test_init_defaut():
+              """Book() sans argument : les 4 attributs valent None"""
+              b = Book()
+              for a in ("id", "title", "year", "author"):
+                  assert hasattr(b, a), f"l'attribut {a} n'existe pas"
+                  assert getattr(b, a) is None, f"{a} devrait valoir None par défaut"
+
+          def test_init_valeurs():
+              """Book(id=1, title='Dune', year=1965, author='Herbert') stocke les valeurs"""
+              b = Book(id=1, title="Dune", year=1965, author="Herbert")
+              assert (b.id, b.title, b.year, b.author) == (1, "Dune", 1965, "Herbert")
+
+          def test_to_dict():
+              """to_dict() renvoie un dictionnaire avec les 4 clés"""
+              b = Book(id=1, title="Dune", year=1965, author="Herbert")
+              d = b.to_dict()
+              assert d == {"id": 1, "title": "Dune", "year": 1965, "author": "Herbert"}, f"obtenu : {d}"
+
+          def test_getitem():
+              """book['title'] fonctionne comme book.title"""
+              assert Book(title="Dune")["title"] == "Dune"
+
+          def test_contains():
+              """'title' in book vaut True, 'isbn' in book vaut False"""
+              b = Book()
+              assert "title" in b, "'title' in b devrait être vrai"
+              assert "isbn" not in b, "'isbn' in b devrait être faux"
+
+          def test_repr():
+              """repr(Book(id=1, title='Dune')) vaut '<Book id=1 title=Dune>'"""
+              r = repr(Book(id=1, title="Dune"))
+              assert r == "<Book id=1 title=Dune>", f"obtenu : {r}"
+        solution: |
+          class Book:
+              """représentation abstraite d'un livre"""
+
+              def __init__(self, id=None, title=None, year=None, author=None):
+                  self.id = id
+                  self.title = title
+                  self.year = year
+                  self.author = author
+
+              def to_dict(self):
+                  return {"id": self.id, "title": self.title, "year": self.year, "author": self.author}
+
+              def __getitem__(self, item):
+                  return getattr(self, item)
+
+              def __contains__(self, item):
+                  return hasattr(self, item)
+
+              def __repr__(self):
+                  return f"<Book id={self.id} title={self.title}>"
+        indices:
+          - "Le constructeur : `def __init__(self, id=None, title=None, year=None, author=None):`"
+          - "`__repr__` doit `return` une f-string, sans `print`."
+        explication: "C'est exactement le patron du `Movie` du TD01, transposé à un livre."
+      - type: code
+        tags: [modele-classique]
+        enonce: |
+          La classe `Album` est fournie. Ajoute la méthode de classe `from_dict(cls, data)`, qui crée un `Album` à partir d'un dictionnaire (par exemple `dict(row)` d'une ligne SQL).
+          Une clé absente donne `None`. Une clé inconnue (comme `label`) est ignorée.
+        starter: |
+          class Album:
+              def __init__(self, id=None, title=None, year=None, artist=None):
+                  self.id = id
+                  self.title = title
+                  self.year = year
+                  self.artist = artist
+
+              @classmethod
+              def from_dict(cls, data):
+                  pass
+        tests: |
+          def test_complet():
+              """from_dict avec les 4 clés crée l'album correspondant"""
+              a = Album.from_dict({"id": 1, "title": "Kind of Blue", "year": 1959, "artist": "Miles Davis"})
+              assert isinstance(a, Album), f"from_dict doit renvoyer un Album, pas {type(a).__name__}"
+              assert (a.id, a.title, a.year, a.artist) == (1, "Kind of Blue", 1959, "Miles Davis")
+
+          def test_cle_absente():
+              """une clé absente donne None"""
+              a = Album.from_dict({"title": "Blue Train"})
+              assert a is not None and a.title == "Blue Train" and a.year is None and a.id is None
+
+          def test_cle_inconnue():
+              """une clé inconnue (label) est ignorée sans erreur"""
+              a = Album.from_dict({"id": 2, "title": "Giant Steps", "label": "Atlantic"})
+              assert a is not None and a.id == 2
+        solution: |
+          class Album:
+              def __init__(self, id=None, title=None, year=None, artist=None):
+                  self.id = id
+                  self.title = title
+                  self.year = year
+                  self.artist = artist
+
+              @classmethod
+              def from_dict(cls, data):
+                  return cls(
+                      id=data.get("id"),
+                      title=data.get("title"),
+                      year=data.get("year"),
+                      artist=data.get("artist"),
+                  )
+        indices: ["`data.get('year')` renvoie `None` si la clé est absente."]
+        explication: "`cls(...)` appelle le constructeur de la classe. `dict.get` gère les clés manquantes, et en ne lisant que les 4 clés connues, on ignore les autres."
+
+  - id: "1.8"
+    palier: 3
+    title: "DAO sqlite3 avec interface (domaine : musique)"
+    memo: |
+      - L'**interface** liste les méthodes (corps `pass` + docstring) : `connect`, `findAll(limit)`, `findById(id)`, `findByYear(year)`.
+      - L'implémentation hérite de l'interface : `class MovieSqliteDAO(MovieDAOInterface)`.
+      - `connect()` : `conn = sqlite3.connect(self.db_path)` puis `conn.row_factory = sqlite3.Row` (accès aux colonnes par leur nom).
+      - Toujours des requêtes **paramétrées** : `cursor.execute("... WHERE year = ?", (year,))`. Jamais de f-string (risque d'injection SQL). Attention à la virgule du tuple `(year,)`.
+      - `rows = cursor.fetchall()`, puis `conn.close()`, puis conversion avec `[dict(row) for row in rows]`.
+      - Le service ne connaît que l'interface : on passera à l'ORM (`MovieSqliteORM`) sans le modifier.
+    example: |
+      import sqlite3
+      from app.models.MovieDAOInterface import MovieDAOInterface
+
+      class MovieSqliteDAO(MovieDAOInterface):
+          def __init__(self, db_path=None):
+              self.db_path = db_path
+
+          def connect(self):
+              conn = sqlite3.connect(self.db_path)
+              conn.row_factory = sqlite3.Row          # row['title'] possible
+              return conn
+
+          def findByYear(self, year):
+              conn = self.connect()
+              cursor = conn.cursor()
+              cursor.execute("SELECT id, title, year FROM movies WHERE year = ?", (year,))
+              rows = cursor.fetchall()
+              conn.close()
+              return [dict(row) for row in rows]
+    exercises:
+      - type: qcm
+        tags: [dao-sqlite3, sql-injection]
+        enonce: "Pourquoi écrit-on `cursor.execute('... WHERE year = ?', (year,))` plutôt qu'une f-string ?"
+        choices: ["Pour éviter l'injection SQL", "Parce que c'est plus rapide à taper", "Parce que les f-strings n'existent pas en SQL", "Pour que `row_factory` fonctionne"]
+        answer: 0
+        explication: "Le pilote échappe la valeur lui-même. Avec une f-string, une saisie comme `' OR 1=1 --` modifierait la requête."
+      - type: trous
+        tags: [dao-sqlite3]
+        enonce: "Complète `connect()` et `findById()`."
+        code: |
+          def connect(self):
+              conn = sqlite3.[[0]](self.db_path)
+              conn.row_factory = [[1]]
+              return conn
+
+          def findById(self, id):
+              conn = self.connect()
+              cursor = conn.cursor()
+              cursor.execute("SELECT * FROM albums WHERE id = ?", [[2]])
+              rows = cursor.[[3]]()
+              conn.close()
+              return [dict(row) for row in rows]
+        blanks:
+          - ["connect"]
+          - ["sqlite3.Row"]
+          - ["(id,)", "[id]"]
+          - ["fetchall"]
+        indices: ["Un tuple à un seul élément s'écrit avec une virgule : `(x,)`."]
+      - type: bug
+        tags: [dao-sqlite3, sql-injection]
+        enonce: "Cette méthode contient **2 erreurs** : une faille de sécurité et une ressource jamais libérée."
+        code: |
+          def findByYear(self, year):
+              conn = self.connect()
+              cursor = conn.cursor()
+              cursor.execute(f"SELECT * FROM albums WHERE year = {year}")
+              rows = cursor.fetchall()
+              conn.close
+              return [dict(row) for row in rows]
+        fixes:
+          4: ["cursor.execute(\"SELECT * FROM albums WHERE year = ?\", (year,))", "cursor.execute(\"SELECT * FROM albums WHERE year = ?\", [year])"]
+          6: ["conn.close()"]
+        explication: "Requête paramétrée avec `?`, et `conn.close()` **avec** les parenthèses : sans elles, la méthode n'est pas appelée."
+      - type: bug
+        tags: [dao-sqlite3]
+        enonce: "Ce DAO contient **2 erreurs**."
+        code: |
+          class AlbumSqliteDAO(AlbumDAOInterface):
+              def __init__(self, db_path=None):
+                  self.db_path = db_path
+
+              def connect(self):
+                  conn = sqlite3.connect(self.db_path)
+                  conn.row_factory = sqlite3.row
+                  return conn
+
+              def findById(self, id):
+                  conn = self.connect()
+                  cursor = conn.cursor()
+                  cursor.execute("SELECT * FROM albums WHERE id = ?", (id))
+                  rows = cursor.fetchall()
+                  conn.close()
+                  return [dict(row) for row in rows]
+        fixes:
+          7: ["conn.row_factory = sqlite3.Row"]
+          13: ["cursor.execute(\"SELECT * FROM albums WHERE id = ?\", (id,))", "cursor.execute(\"SELECT * FROM albums WHERE id = ?\", [id])"]
+        explication: "`sqlite3.Row` prend une majuscule. Et `(id)` n'est pas un tuple, juste `id` entre parenthèses : il faut `(id,)`."
+      - type: code
+        tags: [dao-sqlite3, dao-interface]
+        enonce: |
+          Écris `AlbumSqliteDAO`, qui hérite de `AlbumDAOInterface` (fournie). La table est `albums(id, title, year, artist)` :
+          - `connect()` avec `row_factory = sqlite3.Row` ;
+          - `findAll(limit=None)`, `findById(id)`, `findByYear(year)`, qui renvoient des **listes de dictionnaires** ;
+          - des requêtes paramétrées, et une connexion fermée à chaque fois.
+          (Une base de test `albums.db` contenant 4 albums est créée pour toi.)
+        setup: |
+          import sqlite3
+          _c = sqlite3.connect("albums.db")
+          _c.executescript("""
+          DROP TABLE IF EXISTS albums;
+          CREATE TABLE albums (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, year INTEGER, artist TEXT);
+          INSERT INTO albums (title, year, artist) VALUES ('Kind of Blue', 1959, 'Miles Davis');
+          INSERT INTO albums (title, year, artist) VALUES ('A Love Supreme', 1965, 'John Coltrane');
+          INSERT INTO albums (title, year, artist) VALUES ('Blue Train', 1957, 'John Coltrane');
+          INSERT INTO albums (title, year, artist) VALUES ('Giant Steps', 1959, 'John Coltrane');
+          """)
+          _c.commit()
+          _c.close()
+
+          class AlbumDAOInterface:
+              """interface du DAO des albums"""
+              def connect(self): pass
+              def findAll(self, limit=None): pass
+              def findById(self, id): pass
+              def findByYear(self, year): pass
+        starter: |
+          import sqlite3
+
+
+          class AlbumSqliteDAO(AlbumDAOInterface):
+              """DAO des albums (sqlite3)"""
+
+              def __init__(self, db_path=None):
+                  self.db_path = db_path
+
+              def connect(self):
+                  pass
+
+              def findAll(self, limit=None):
+                  pass
+
+              def findById(self, id):
+                  pass
+
+              def findByYear(self, year):
+                  pass
+        tests: |
+          def test_herite_interface():
+              """AlbumSqliteDAO hérite de AlbumDAOInterface"""
+              assert issubclass(AlbumSqliteDAO, AlbumDAOInterface)
+
+          def test_connect_row_factory():
+              """connect() renvoie une connexion avec row_factory = sqlite3.Row"""
+              conn = AlbumSqliteDAO("albums.db").connect()
+              assert conn is not None, "connect() ne renvoie rien"
+              assert conn.row_factory is sqlite3.Row, "pense à conn.row_factory = sqlite3.Row"
+              conn.close()
+
+          def test_findAll():
+              """findAll() renvoie les 4 albums sous forme de dictionnaires"""
+              res = AlbumSqliteDAO("albums.db").findAll()
+              assert isinstance(res, list) and len(res) == 4, f"attendu 4 albums, obtenu {res!r}"
+              assert isinstance(res[0], dict) and "title" in res[0], "chaque album doit être un dict : dict(row)"
+
+          def test_findAll_limit():
+              """findAll(limit=2) renvoie 2 albums"""
+              res = AlbumSqliteDAO("albums.db").findAll(limit=2)
+              assert res is not None and len(res) == 2, f"obtenu {res!r}"
+
+          def test_findById():
+              """findById(2) renvoie une liste contenant 'A Love Supreme'"""
+              res = AlbumSqliteDAO("albums.db").findById(2)
+              assert res and len(res) == 1 and res[0]["title"] == "A Love Supreme", f"obtenu {res!r}"
+
+          def test_findByYear():
+              """findByYear(1959) renvoie les 2 albums de 1959"""
+              res = AlbumSqliteDAO("albums.db").findByYear(1959) or []
+              assert sorted(a["title"] for a in res) == ["Giant Steps", "Kind of Blue"], f"obtenu {res!r}"
+        solution: |
+          import sqlite3
+
+
+          class AlbumSqliteDAO(AlbumDAOInterface):
+              """DAO des albums (sqlite3)"""
+
+              def __init__(self, db_path=None):
+                  self.db_path = db_path
+
+              def connect(self):
+                  conn = sqlite3.connect(self.db_path)
+                  conn.row_factory = sqlite3.Row
+                  return conn
+
+              def findAll(self, limit=None):
+                  conn = self.connect()
+                  cursor = conn.cursor()
+                  if limit:
+                      cursor.execute("SELECT id, title, year, artist FROM albums LIMIT ?", (limit,))
+                  else:
+                      cursor.execute("SELECT id, title, year, artist FROM albums")
+                  rows = cursor.fetchall()
+                  conn.close()
+                  return [dict(row) for row in rows]
+
+              def findById(self, id):
+                  conn = self.connect()
+                  cursor = conn.cursor()
+                  cursor.execute("SELECT id, title, year, artist FROM albums WHERE id = ?", (id,))
+                  rows = cursor.fetchall()
+                  conn.close()
+                  return [dict(row) for row in rows]
+
+              def findByYear(self, year):
+                  conn = self.connect()
+                  cursor = conn.cursor()
+                  cursor.execute("SELECT id, title, year, artist FROM albums WHERE year = ?", (year,))
+                  rows = cursor.fetchall()
+                  conn.close()
+                  return [dict(row) for row in rows]
+        indices:
+          - "Pour `limit`, deux requêtes : avec `LIMIT ?` si `limit` est fourni, sans sinon."
+          - "Chaque méthode suit le même schéma : connect → cursor → execute → fetchall → close → `[dict(row) for row in rows]`."
+        explication: "C'est le `MovieSqliteDAO` du TD01, transposé aux albums."
+      - type: code
+        tags: [dao-sqlite3, sql-injection, modele-classique]
+        enonce: |
+          Ajoute à `AlbumSqliteDAO` la méthode `findByArtist(name)`. Elle renvoie, sous forme d'**objets `Album`** (classe fournie, avec `Album.from_dict`), les albums dont l'artiste **contient** `name`.
+          Utilise `LIKE` avec un paramètre : la valeur passée est `f"%{name}%"`.
+        setup: |
+          import sqlite3
+          _c = sqlite3.connect("albums.db")
+          _c.executescript("""
+          DROP TABLE IF EXISTS albums;
+          CREATE TABLE albums (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, year INTEGER, artist TEXT);
+          INSERT INTO albums (title, year, artist) VALUES ('Kind of Blue', 1959, 'Miles Davis');
+          INSERT INTO albums (title, year, artist) VALUES ('A Love Supreme', 1965, 'John Coltrane');
+          INSERT INTO albums (title, year, artist) VALUES ('Blue Train', 1957, 'John Coltrane');
+          INSERT INTO albums (title, year, artist) VALUES ('Giant Steps', 1959, 'John Coltrane');
+          """)
+          _c.commit()
+          _c.close()
+
+          class AlbumDAOInterface:
+              pass
+
+          class Album:
+              def __init__(self, id=None, title=None, year=None, artist=None):
+                  self.id, self.title, self.year, self.artist = id, title, year, artist
+              @classmethod
+              def from_dict(cls, d):
+                  return cls(d.get("id"), d.get("title"), d.get("year"), d.get("artist"))
+        starter: |
+          class AlbumSqliteDAO(AlbumDAOInterface):
+              def __init__(self, db_path=None):
+                  self.db_path = db_path
+
+              def connect(self):
+                  conn = sqlite3.connect(self.db_path)
+                  conn.row_factory = sqlite3.Row
+                  return conn
+
+              def findByArtist(self, name):
+                  """albums dont l'artiste contient name, en objets Album"""
+                  pass
+        tests: |
+          def test_coltrane():
+              """findByArtist('Coltrane') renvoie 3 objets Album"""
+              res = AlbumSqliteDAO("albums.db").findByArtist("Coltrane") or []
+              assert len(res) == 3, f"attendu 3 albums, obtenu {len(res)}"
+              assert all(isinstance(a, Album) for a in res), "il faut des objets Album (Album.from_dict(dict(row)))"
+
+          def test_partiel():
+              """findByArtist('Miles') trouve 'Kind of Blue'"""
+              res = AlbumSqliteDAO("albums.db").findByArtist("Miles") or []
+              assert [a.title for a in res] == ["Kind of Blue"]
+
+          def test_aucun():
+              """findByArtist('Daft Punk') renvoie une liste vide"""
+              assert AlbumSqliteDAO("albums.db").findByArtist("Daft Punk") == []
+
+          def test_injection():
+              """une saisie piégée ne renvoie rien (requête paramétrée)"""
+              res = AlbumSqliteDAO("albums.db").findByArtist("' OR 1=1 --")
+              assert res == [], "ta requête est injectable : utilise ? et un tuple de paramètres"
+        solution: |
+          class AlbumSqliteDAO(AlbumDAOInterface):
+              def __init__(self, db_path=None):
+                  self.db_path = db_path
+
+              def connect(self):
+                  conn = sqlite3.connect(self.db_path)
+                  conn.row_factory = sqlite3.Row
+                  return conn
+
+              def findByArtist(self, name):
+                  """albums dont l'artiste contient name, en objets Album"""
+                  conn = self.connect()
+                  cursor = conn.cursor()
+                  cursor.execute("SELECT id, title, year, artist FROM albums WHERE artist LIKE ?", (f"%{name}%",))
+                  rows = cursor.fetchall()
+                  conn.close()
+                  return [Album.from_dict(dict(row)) for row in rows]
+        indices: ["Le `%` se met dans la **valeur** du paramètre, pas dans la requête : `(f\"%{name}%\",)`."]
+        explication: "La valeur `%Coltrane%` est passée en paramètre, donc rien de ce que tape l'utilisateur ne peut modifier la requête."
+
+  - id: "1.9"
+    palier: 3
+    title: "Le service typé (domaine : école)"
+    memo: |
+      - Le service contient la logique métier et appelle le DAO. C'est le blueprint qui l'instancie.
+      - Constructeur : `self.mdao = MovieSqliteDAO(db_path)`, avec `db_path = current_app.config['DATABASE_PATH']` s'il n'est pas fourni.
+      - Typage : `from typing import List, Dict, Optional`, puis `def getAllMovies(self, limit: int = 100) -> List[Dict]:`.
+      - `getMoviesYears` : `sorted(set(m['year'] for m in self.mdao.findAll() if m.get('year')))` donne les années distinctes triées.
+      - Retours homogènes : `getMovieById` renvoie **toujours une liste** (`[movie]` ou `[]`), ce qui simplifie les templates.
+      - Le service ne fait pas de SQL. Pour pouvoir le tester, on peut lui **injecter** le DAO.
+    example: |
+      from typing import List, Dict
+      from flask import current_app
+      from app.models.MovieDAO import MovieSqliteDAO as MovieDAO
+
+      class MovieService:
+          def __init__(self, db_path=None):
+              if db_path is None:
+                  db_path = current_app.config['DATABASE_PATH']
+              self.mdao = MovieDAO(db_path)
+
+          def getMovieById(self, num: int) -> List[Dict]:
+              res = self.mdao.findById(num)
+              if type(res) is not list:          # on force toujours une liste
+                  res = [res]
+              return res
+
+          def getMoviesYears(self) -> List[int]:
+              return sorted(list(set([m["year"] for m in self.mdao.findAll() if m.get("year")])))
+    exercises:
+      - type: qcm
+        tags: [typing, service]
+        enonce: "Quelle annotation de retour convient à `getMoviesYears()` ?"
+        choices: ["`-> List[int]`", "`-> Dict[str, int]`", "`-> int`", "`-> List[Dict]`"]
+        answer: 0
+        explication: "La méthode renvoie une liste triée d'années, donc d'entiers."
+      - type: trous
+        tags: [typing]
+        enonce: "Complète la signature typée."
+        code: |
+          from typing import List, Dict
+
+
+          def getAllMovies(self, limit: [[0]] = 100) -> [[1]]:
+              return self.mdao.findAll(limit=limit)
+        blanks:
+          - ["int"]
+          - ["List[Dict]", "list[dict]"]
+      - type: bug
+        tags: [service]
+        enonce: "Ce service contient **2 erreurs**."
+        code: |
+          class StudentService:
+              def __init__(self, db_path=None):
+                  self.sdao = StudentSqliteDAO(db_path)
+
+              def getClasses(self) -> List[str]:
+                  return sorted(set([s["classe"] for s in self.sdao.findAll]))
+
+              def getStudentById(self, id: int) -> List[Dict]:
+                  res = self.sdao.findById(id)
+                  if type(res) is not list:
+                      res = res
+                  return res
+        fixes:
+          6: ["return sorted(set([s[\"classe\"] for s in self.sdao.findAll()]))"]
+          11: ["res = [res]"]
+        explication: "`findAll` doit être **appelée** (`findAll()`), et on doit envelopper le résultat dans une liste."
+      - type: bug
+        tags: [service, typing]
+        enonce: "Cette méthode renvoie toujours `None` dès qu'il y a des notes. Trouve l'erreur."
+        code: |
+          def getAverage(self, student_id: int) -> Optional[float]:
+              grades = self.sdao.findGrades(student_id)
+              if grades:
+                  return None
+              return round(sum(g["value"] for g in grades) / len(grades), 1)
+        fixes:
+          3: ["if not grades:", "if len(grades) == 0:"]
+        explication: "Le garde-fou doit traiter le cas **vide** (pour éviter la division par zéro), d'où `if not grades:`."
+      - type: code
+        tags: [service, typing]
+        enonce: |
+          Écris `StudentService`. Le DAO est **injecté** dans le constructeur. `dao.findAll()` renvoie une liste de dictionnaires `{"id", "name", "classe"}`, et `dao.findById(id)` renvoie un dictionnaire ou `None`.
+          - `getClasses() -> List[str]` : les classes distinctes, triées ;
+          - `getStudentsByClasse(classe) -> List[Dict]` : les élèves de cette classe ;
+          - `getStudentById(id) -> List[Dict]` : **toujours une liste**, `[eleve]` ou `[]`.
+        setup: |
+          class FakeStudentDAO:
+              def __init__(self):
+                  self.students = [
+                      {"id": 1, "name": "Lina", "classe": "BUT3-A"},
+                      {"id": 2, "name": "Hugo", "classe": "BUT3-B"},
+                      {"id": 3, "name": "Sami", "classe": "BUT3-A"},
+                      {"id": 4, "name": "Emma", "classe": "BUT2-A"},
+                  ]
+              def findAll(self):
+                  return list(self.students)
+              def findById(self, id):
+                  for s in self.students:
+                      if s["id"] == id:
+                          return s
+                  return None
+        starter: |
+          from typing import List, Dict
+
+
+          class StudentService:
+              """logique métier des élèves ; le DAO est injecté"""
+
+              def __init__(self, dao):
+                  self.sdao = dao
+
+              def getClasses(self) -> List[str]:
+                  pass
+
+              def getStudentsByClasse(self, classe: str) -> List[Dict]:
+                  pass
+
+              def getStudentById(self, id: int) -> List[Dict]:
+                  pass
+        tests: |
+          def test_classes():
+              """getClasses() renvoie les classes distinctes triées"""
+              res = StudentService(FakeStudentDAO()).getClasses()
+              assert res == ["BUT2-A", "BUT3-A", "BUT3-B"], f"obtenu {res!r}"
+
+          def test_par_classe():
+              """getStudentsByClasse('BUT3-A') renvoie Lina et Sami"""
+              res = StudentService(FakeStudentDAO()).getStudentsByClasse("BUT3-A") or []
+              assert [s["name"] for s in res] == ["Lina", "Sami"], f"obtenu {res!r}"
+
+          def test_par_classe_vide():
+              """une classe inconnue donne une liste vide"""
+              assert StudentService(FakeStudentDAO()).getStudentsByClasse("MMI1") == []
+
+          def test_by_id():
+              """getStudentById(2) renvoie [Hugo] (une liste)"""
+              res = StudentService(FakeStudentDAO()).getStudentById(2)
+              assert isinstance(res, list) and len(res) == 1 and res[0]["name"] == "Hugo", f"obtenu {res!r}"
+
+          def test_by_id_absent():
+              """getStudentById(99) renvoie [] et non [None]"""
+              res = StudentService(FakeStudentDAO()).getStudentById(99)
+              assert res == [], f"obtenu {res!r}"
+        solution: |
+          from typing import List, Dict
+
+
+          class StudentService:
+              """logique métier des élèves ; le DAO est injecté"""
+
+              def __init__(self, dao):
+                  self.sdao = dao
+
+              def getClasses(self) -> List[str]:
+                  return sorted(set(s["classe"] for s in self.sdao.findAll()))
+
+              def getStudentsByClasse(self, classe: str) -> List[Dict]:
+                  return [s for s in self.sdao.findAll() if s["classe"] == classe]
+
+              def getStudentById(self, id: int) -> List[Dict]:
+                  res = self.sdao.findById(id)
+                  return [res] if res else []
+        indices:
+          - "`sorted(set(...))` pour obtenir des valeurs distinctes et triées."
+          - "Pour `getStudentById`, attention : `[None]` n'est pas une liste vide."
+      - type: code
+        tags: [service, typing]
+        enonce: |
+          Ajoute à `StudentService` (DAO injecté) :
+          - `getAverage(student_id) -> Optional[float]` : la moyenne des notes, arrondie à 1 décimale, ou `None` s'il n'y a pas de note. `dao.findGrades(id)` renvoie une liste `[{"value": 12}, ...]`.
+          - `getBestStudent(classe) -> Optional[str]` : le **nom** de l'élève qui a la meilleure moyenne dans la classe (on ignore les élèves sans note), ou `None`.
+        setup: |
+          class FakeDAO:
+              students = [
+                  {"id": 1, "name": "Lina", "classe": "A"},
+                  {"id": 2, "name": "Hugo", "classe": "A"},
+                  {"id": 3, "name": "Sami", "classe": "B"},
+                  {"id": 4, "name": "Emma", "classe": "A"},
+              ]
+              grades = {1: [12, 15, 14], 2: [16, 18], 3: [9], 4: []}
+              def findAll(self):
+                  return list(self.students)
+              def findGrades(self, student_id):
+                  return [{"value": v} for v in self.grades.get(student_id, [])]
+        starter: |
+          from typing import Optional
+
+
+          class StudentService:
+              def __init__(self, dao):
+                  self.sdao = dao
+
+              def getAverage(self, student_id: int) -> Optional[float]:
+                  pass
+
+              def getBestStudent(self, classe: str) -> Optional[str]:
+                  pass
+        tests: |
+          def test_moyenne():
+              """getAverage(1) vaut 13.7"""
+              assert StudentService(FakeDAO()).getAverage(1) == 13.7
+
+          def test_moyenne_vide():
+              """getAverage(4) vaut None (aucune note)"""
+              assert StudentService(FakeDAO()).getAverage(4) is None
+
+          def test_meilleur():
+              """getBestStudent('A') vaut 'Hugo'"""
+              res = StudentService(FakeDAO()).getBestStudent("A")
+              assert res == "Hugo", f"obtenu {res!r}"
+
+          def test_meilleur_autre_classe():
+              """getBestStudent('B') vaut 'Sami'"""
+              assert StudentService(FakeDAO()).getBestStudent("B") == "Sami"
+
+          def test_meilleur_aucun():
+              """getBestStudent('Z') vaut None"""
+              assert StudentService(FakeDAO()).getBestStudent("Z") is None
+        solution: |
+          from typing import Optional
+
+
+          class StudentService:
+              def __init__(self, dao):
+                  self.sdao = dao
+
+              def getAverage(self, student_id: int) -> Optional[float]:
+                  grades = self.sdao.findGrades(student_id)
+                  if not grades:
+                      return None
+                  return round(sum(g["value"] for g in grades) / len(grades), 1)
+
+              def getBestStudent(self, classe: str) -> Optional[str]:
+                  best_name, best_avg = None, None
+                  for s in self.sdao.findAll():
+                      if s["classe"] != classe:
+                          continue
+                      avg = self.getAverage(s["id"])
+                      if avg is not None and (best_avg is None or avg > best_avg):
+                          best_name, best_avg = s["name"], avg
+                  return best_name
+        indices: ["Réutilise `self.getAverage(...)` dans `getBestStudent`."]
+
+  # ===================================================================== PALIER 4
+  - id: "1.10"
+    palier: 4
+    title: "Sujet papier A : bibliothèque modulaire"
+    memo: |
+      **Sujet.** Tu crées l'application Flask `library` (bibliothèque), organisée comme dans le cours : MVC-S + blueprints.
+      - Le service `BookService` est fourni dans `app/services/BookService.py`. Il propose `getAllBooks()` (une liste de `Book`) et `getBookById(id)` (toujours une liste).
+      - Un `Book` a une méthode `to_dict()`.
+      - Écris chaque réponse comme sur ta copie : pas d'autocomplétion, chronomètre par question.
+      - Après chaque copie : compare avec le corrigé et coche la grille honnêtement.
+    exercises:
+      - type: papier
+        tags: [arborescence, module-package]
+        enonce: "Écris l'arborescence complète du projet : `main.py`, le package `app`, le blueprint `books`, les modèles (`Book`, `BookDAOInterface`, `BookDAO`) et le service."
+        duree: 300
+        grille:
+          - {critere: "`main.py` à la racine, à côté du dossier `app/`", points: 1}
+          - {critere: "`app/__init__.py` (le package principal)", points: 1}
+          - {critere: "`app/blueprints/__init__.py` et `app/blueprints/books/` avec `__init__.py` et `routes.py`", points: 1}
+          - {critere: "`app/models/` avec `__init__.py`, `Book.py`, `BookDAOInterface.py`, `BookDAO.py`", points: 1}
+          - {critere: "`app/services/` avec `__init__.py` et `BookService.py` (plus `static/` et `templates/`)", points: 1}
+        solution: |
+          library/
+          ├── main.py
+          └── app/
+              ├── __init__.py            # create_app()
+              ├── blueprints/
+              │   ├── __init__.py        # réexporte books_bp
+              │   └── books/
+              │       ├── __init__.py    # from .routes import books_bp
+              │       ├── routes.py
+              │       └── templates/
+              ├── models/
+              │   ├── __init__.py
+              │   ├── Book.py
+              │   ├── BookDAOInterface.py
+              │   └── BookDAO.py
+              ├── services/
+              │   ├── __init__.py
+              │   └── BookService.py
+              ├── static/
+              └── templates/
+                  └── layout.html
+        explication: "Chaque dossier Python est un package, donc il contient un `__init__.py`. Il n'y a pas de dossier `controllers` : ce sont les blueprints."
+      - type: papier
+        tags: [main, factory]
+        enonce: "Écris `main.py`, qui lance l'application sur le port 8000 en mode debug."
+        duree: 180
+        setup: |
+          class _FakeApp:
+              def __init__(self):
+                  self.run_args = None
+              def run(self, *args, **kwargs):
+                  self.run_args = (args, kwargs)
+          fake_module("app", create_app=lambda: _FakeApp())
+        tests: |
+          SRC = open("student.py", encoding="utf-8").read()
+
+          def test_create_app():
+              """app = create_app() au niveau du module"""
+              assert isinstance(globals().get("app"), _FakeApp), "il faut from app import create_app puis app = create_app()"
+
+          def test_main_guard():
+              """app.run n'est appelé que si le fichier est exécuté directement"""
+              assert globals()["app"].run_args is None, "app.run doit être sous if __name__ == '__main__'"
+              ns = {"__name__": "__main__"}
+              exec(SRC, ns)
+              assert ns["app"].run_args is not None, "app.run(...) n'est pas appelé quand __name__ == '__main__'"
+
+          def test_port():
+              """app.run(...) utilise le port 8000"""
+              ns = {"__name__": "__main__"}
+              exec(SRC, ns)
+              args, kwargs = ns["app"].run_args
+              assert kwargs.get("port") == 8000 or 8000 in args, f"run appelé avec {args} {kwargs}"
+        grille:
+          - {critere: "`from app import create_app`", points: 1, auto: test_create_app}
+          - {critere: "`app = create_app()`", points: 1, auto: test_create_app}
+          - {critere: "`if __name__ == '__main__':`", points: 1, auto: test_main_guard}
+          - {critere: "`app.run(host=\"localhost\", port=8000, debug=True)`", points: 1, auto: test_port}
+        solution: |
+          from app import create_app
+
+          app = create_app()
+
+          if __name__ == '__main__':
+              app.run(host="localhost", port=8000, debug=True)
+      - type: papier
+        tags: [factory, register-bp, config]
+        enonce: "Écris `app/__init__.py` avec `create_app()`. Elle doit : créer l'app, définir `DATABASE_PATH` (fichier `library.db` dans le dossier de l'app) et une `secret_key`, puis importer et enregistrer `books_bp` (depuis `app.blueprints`) sous le préfixe `/books`."
+        duree: 420
+        setup: |
+          from flask import Blueprint
+          _books = Blueprint("books", "fake_books")
+          @_books.route("/")
+          def _books_index():
+              return "ok"
+          fake_module("app.blueprints", books_bp=_books)
+        tests: |
+          def test_flask():
+              """create_app() renvoie une application Flask"""
+              from flask import Flask
+              assert isinstance(create_app(), Flask), "create_app doit retourner app"
+
+          def test_database_path():
+              """DATABASE_PATH se termine par library.db"""
+              app = create_app()
+              assert str(app.config.get("DATABASE_PATH", "")).endswith("library.db"), "app.config['DATABASE_PATH'] = os.path.join(app.root_path, 'library.db')"
+
+          def test_books_prefix():
+              """le blueprint books répond sur /books/"""
+              app = create_app()
+              assert app.test_client().get("/books/").status_code == 200, "books_bp doit être enregistré avec url_prefix='/books'"
+        grille:
+          - {critere: "`app = Flask(__name__, ...)` puis `return app`", points: 1, auto: test_flask}
+          - {critere: "`app.config['DATABASE_PATH'] = os.path.join(app.root_path, 'library.db')`", points: 1, auto: test_database_path}
+          - {critere: "`app.secret_key = ...`", points: 0.5}
+          - {critere: "Import de `books_bp` **dans** la fonction", points: 1}
+          - {critere: "`app.register_blueprint(books_bp, url_prefix='/books')`", points: 1.5, auto: test_books_prefix}
+        solution: |
+          import os
+          from flask import Flask
+
+
+          def create_app():
+              app = Flask(__name__, static_url_path='/static')
+              app.config['DATABASE_PATH'] = os.path.join(app.root_path, 'library.db')
+              app.secret_key = 'ma cle secrete unique'
+
+              from app.blueprints import books_bp
+              app.register_blueprint(books_bp, url_prefix='/books')
+              return app
+      - type: papier
+        tags: [blueprint, route-params, jsonify]
+        enonce: |
+          Écris `app/blueprints/books/routes.py` :
+          - le blueprint `books_bp`, avec son dossier de templates ;
+          - `GET /` : la liste des livres en JSON (`to_dict()`) ;
+          - `GET /<id>` (entier) : un livre en JSON, ou une erreur 404 s'il n'existe pas (`abort(404)`).
+        duree: 480
+        setup: |
+          class _Book:
+              def __init__(self, id, title):
+                  self.id, self.title = id, title
+              def to_dict(self):
+                  return {"id": self.id, "title": self.title}
+          class _BookService:
+              _books = [_Book(1, "Dune"), _Book(2, "Fondation")]
+              def getAllBooks(self):
+                  return list(self._books)
+              def getBookById(self, id):
+                  return [b for b in self._books if b.id == id]
+          fake_module("app.services.BookService", BookService=_BookService)
+        tests: |
+          from flask import Flask
+
+          def _client():
+              app = Flask("test_books")
+              app.register_blueprint(books_bp, url_prefix="/books")
+              return app.test_client()
+
+          def test_blueprint():
+              """books_bp est un Blueprint nommé 'books'"""
+              from flask import Blueprint
+              assert isinstance(books_bp, Blueprint) and books_bp.name == "books", "books_bp = Blueprint('books', __name__, ...)"
+
+          def test_liste():
+              """GET /books/ renvoie la liste JSON des 2 livres"""
+              r = _client().get("/books/")
+              assert r.status_code == 200 and r.get_json() == [{"id": 1, "title": "Dune"}, {"id": 2, "title": "Fondation"}], f"obtenu {r.status_code} {r.get_data(as_text=True)[:100]}"
+
+          def test_detail():
+              """GET /books/2 renvoie le livre 2 en JSON"""
+              r = _client().get("/books/2")
+              data = r.get_json()
+              assert r.status_code == 200 and data and (data == {"id": 2, "title": "Fondation"} or data == [{"id": 2, "title": "Fondation"}]), f"obtenu {r.status_code} {r.get_data(as_text=True)[:100]}"
+
+          def test_404():
+              """GET /books/99 renvoie 404"""
+              assert _client().get("/books/99").status_code == 404
+        grille:
+          - {critere: "`books_bp = Blueprint('books', __name__, template_folder='templates')`", points: 1, auto: test_blueprint}
+          - {critere: "Import de `jsonify`, `abort` et de `BookService`", points: 0.5}
+          - {critere: "Route `'/'` avec `methods=['GET']`, qui renvoie `jsonify([b.to_dict() for b in ...])`", points: 1.5, auto: test_liste}
+          - {critere: "Route `'/<int:book_id>'` avec le paramètre dans la fonction", points: 1, auto: test_detail}
+          - {critere: "`abort(404)` si la liste est vide", points: 1, auto: test_404}
+        solution: |
+          from flask import Blueprint, jsonify, abort
+          from app.services.BookService import BookService
+
+          books_bp = Blueprint('books', __name__, template_folder='templates')
+
+
+          @books_bp.route('/', methods=['GET'])
+          def books():
+              bs = BookService()
+              return jsonify([b.to_dict() for b in bs.getAllBooks()])
+
+
+          @books_bp.route('/<int:book_id>', methods=['GET'])
+          def book_view(book_id):
+              bs = BookService()
+              book = bs.getBookById(book_id)
+              if not book:
+                  abort(404)
+              return jsonify(book[0].to_dict())
+      - type: papier
+        tags: [init-all, blueprint]
+        enonce: "Écris les deux fichiers `app/blueprints/books/__init__.py` et `app/blueprints/__init__.py`, en indiquant clairement le nom de chaque fichier."
+        duree: 180
+        grille:
+          - {critere: "`books/__init__.py` : `from .routes import books_bp`", points: 1}
+          - {critere: "`books/__init__.py` : `__all__ = ['books_bp']`", points: 1}
+          - {critere: "`blueprints/__init__.py` : `from app.blueprints.books import books_bp`", points: 1}
+          - {critere: "`blueprints/__init__.py` : `__all__` qui liste `'books_bp'` (des chaînes)", points: 1}
+        solution: |
+          # app/blueprints/books/__init__.py
+          from .routes import books_bp
+
+          __all__ = ['books_bp']
+
+
+          # app/blueprints/__init__.py
+          from app.blueprints.books import books_bp
+
+          __all__ = [
+              'books_bp',
+          ]
+      - type: papier
+        tags: [blueprint, mvcs]
+        enonce: "Question de cours : en 4 à 6 lignes, donne les avantages des blueprints par rapport à une application en module unique (`@app.route` partout)."
+        duree: 300
+        grille:
+          - {critere: "Découpage en composants (modules) autonomes, souvent par fonctionnalité", points: 1}
+          - {critere: "Chaque blueprint a ses propres routes (`@bp.route`), templates et préfixe d'URL", points: 1}
+          - {critere: "Évite les imports circulaires liés au contexte global `app`", points: 1}
+          - {critere: "Travail en équipe facilité, et blueprints réutilisables d'un projet à l'autre", points: 1}
+        solution: |
+          Les blueprints découpent le backend en composants autonomes, en général un par fonctionnalité.
+          Chaque blueprint a ses propres routes (@bp.route), ses templates, ses fichiers statiques et son préfixe d'URL.
+          Il est rattaché explicitement à l'application avec app.register_blueprint(), ce qui évite les
+          problèmes d'imports circulaires dus au contexte global @app.route.
+          Enfin, chaque développeur peut travailler sur son blueprint avant de le brancher (un peu comme une
+          branche git), et un blueprint est réutilisable d'un projet à l'autre.
+
+  - id: "1.11"
+    palier: 4
+    title: "Sujet papier B : musique, Model + DAO sqlite3"
+    memo: |
+      **Sujet.** La base `music.db` contient la table `albums(id INTEGER PRIMARY KEY, title TEXT NOT NULL, year INTEGER, artist TEXT)`.
+      - Tu écris le modèle `Album`, l'interface `AlbumDAOInterface` et le DAO `AlbumSqliteDAO`.
+      - Chaque question est indépendante : recopie ce dont tu as besoin.
+    exercises:
+      - type: papier
+        tags: [modele-classique]
+        enonce: "Écris la classe `Album` : un constructeur (tous les champs à `None` par défaut) et `to_dict()`."
+        duree: 240
+        tests: |
+          def test_defaut():
+              """Album() : id, title, year, artist valent None"""
+              a = Album()
+              assert all(getattr(a, k, "absent") is None for k in ("id", "title", "year", "artist"))
+
+          def test_to_dict():
+              """to_dict() renvoie les 4 champs"""
+              a = Album(1, "Kind of Blue", 1959, "Miles Davis")
+              assert a.to_dict() == {"id": 1, "title": "Kind of Blue", "year": 1959, "artist": "Miles Davis"}
+        grille:
+          - {critere: "`def __init__(self, id=None, title=None, year=None, artist=None)`", points: 1, auto: test_defaut}
+          - {critere: "Les 4 attributs affectés avec `self.`", points: 1, auto: test_defaut}
+          - {critere: "`to_dict()` retourne un dictionnaire des 4 champs", points: 1, auto: test_to_dict}
+        solution: |
+          class Album:
+              """représentation abstraite d'un album"""
+              def __init__(self, id=None, title=None, year=None, artist=None):
+                  self.id = id
+                  self.title = title
+                  self.year = year
+                  self.artist = artist
+
+              def to_dict(self):
+                  return {"id": self.id, "title": self.title, "year": self.year, "artist": self.artist}
+      - type: papier
+        tags: [dunder, modele-classique]
+        enonce: "Ajoute à `Album` les méthodes `__getitem__`, `__contains__` et `__repr__` (format `<Album id=1 title=Kind of Blue>`). Recopie la classe entière."
+        duree: 240
+        tests: |
+          def test_getitem():
+              """album['title'] fonctionne"""
+              assert Album(title="Blue Train")["title"] == "Blue Train"
+
+          def test_contains():
+              """'year' in album est vrai, 'label' in album est faux"""
+              a = Album()
+              assert "year" in a and "label" not in a
+
+          def test_repr():
+              """repr renvoie <Album id=1 title=Kind of Blue>"""
+              assert repr(Album(1, "Kind of Blue")) == "<Album id=1 title=Kind of Blue>"
+        grille:
+          - {critere: "`__getitem__` avec `return getattr(self, item)`", points: 1, auto: test_getitem}
+          - {critere: "`__contains__` avec `return hasattr(self, item)`", points: 1, auto: test_contains}
+          - {critere: "`__repr__` qui **retourne** la chaîne au bon format", points: 1, auto: test_repr}
+        solution: |
+          class Album:
+              def __init__(self, id=None, title=None, year=None, artist=None):
+                  self.id = id
+                  self.title = title
+                  self.year = year
+                  self.artist = artist
+
+              def to_dict(self):
+                  return {"id": self.id, "title": self.title, "year": self.year, "artist": self.artist}
+
+              def __getitem__(self, item):
+                  return getattr(self, item)
+
+              def __contains__(self, item):
+                  return hasattr(self, item)
+
+              def __repr__(self):
+                  return f"<Album id={self.id} title={self.title}>"
+      - type: papier
+        tags: [dao-interface]
+        enonce: "Écris `AlbumDAOInterface`, avec les méthodes `connect`, `findAll(limit)`, `findById(id)` et `findByYear(year)`, et une docstring pour chacune."
+        duree: 180
+        tests: |
+          def test_methodes():
+              """l'interface déclare connect, findAll, findById, findByYear"""
+              for m in ("connect", "findAll", "findById", "findByYear"):
+                  assert callable(getattr(AlbumDAOInterface, m, None)), f"méthode {m} manquante"
+
+          def test_corps_vide():
+              """les méthodes ne font rien (pass) : elles renvoient None"""
+              i = AlbumDAOInterface()
+              assert i.connect() is None and i.findAll() is None and i.findById(1) is None and i.findByYear(1959) is None
+        grille:
+          - {critere: "`class AlbumDAOInterface:` avec les 4 méthodes et `self`", points: 1, auto: test_methodes}
+          - {critere: "Corps `pass` (aucune implémentation)", points: 1, auto: test_corps_vide}
+          - {critere: "`findAll(self, limit=None)` avec une valeur par défaut", points: 0.5}
+          - {critere: "Une docstring par méthode", points: 0.5}
+        solution: |
+          class AlbumDAOInterface:
+              """interface du DAO des albums"""
+
+              def connect(self):
+                  """ouvre une connexion à la base"""
+                  pass
+
+              def findAll(self, limit=None):
+                  """trouve tous les albums (ou les limit premiers)"""
+                  pass
+
+              def findById(self, id):
+                  """trouve un album par son id"""
+                  pass
+
+              def findByYear(self, year):
+                  """trouve les albums d'une année"""
+                  pass
+      - type: papier
+        tags: [dao-sqlite3]
+        enonce: "Écris le début de `AlbumSqliteDAO(AlbumDAOInterface)` : le constructeur (`db_path`), `connect()` et `findAll(limit=None)`, qui renvoie une liste de dictionnaires."
+        duree: 420
+        setup: |
+          import sqlite3
+          _c = sqlite3.connect("music.db")
+          _c.executescript("""
+          DROP TABLE IF EXISTS albums;
+          CREATE TABLE albums (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, year INTEGER, artist TEXT);
+          INSERT INTO albums (title, year, artist) VALUES ('Kind of Blue', 1959, 'Miles Davis');
+          INSERT INTO albums (title, year, artist) VALUES ('A Love Supreme', 1965, 'John Coltrane');
+          INSERT INTO albums (title, year, artist) VALUES ('Blue Train', 1957, 'John Coltrane');
+          """)
+          _c.commit()
+          _c.close()
+          class AlbumDAOInterface:
+              pass
+          fake_module("app.models.AlbumDAOInterface", AlbumDAOInterface=AlbumDAOInterface)
+        tests: |
+          def test_connect():
+              """connect() utilise sqlite3.Row"""
+              conn = AlbumSqliteDAO("music.db").connect()
+              assert conn.row_factory is sqlite3.Row
+              conn.close()
+
+          def test_findAll():
+              """findAll() renvoie 3 dictionnaires"""
+              res = AlbumSqliteDAO("music.db").findAll()
+              assert len(res) == 3 and isinstance(res[0], dict)
+
+          def test_limit():
+              """findAll(2) renvoie 2 albums"""
+              assert len(AlbumSqliteDAO("music.db").findAll(2)) == 2
+        grille:
+          - {critere: "`class AlbumSqliteDAO(AlbumDAOInterface)` et `self.db_path = db_path`", points: 1}
+          - {critere: "`connect()` : `sqlite3.connect(self.db_path)`, `row_factory = sqlite3.Row`, `return conn`", points: 1.5, auto: test_connect}
+          - {critere: "`findAll` : `LIMIT ?` avec `(limit,)` si `limit` est donné", points: 1, auto: test_limit}
+          - {critere: "`fetchall()`, `conn.close()`, `[dict(row) for row in rows]`", points: 1.5, auto: test_findAll}
+        solution: |
+          import sqlite3
+          from app.models.AlbumDAOInterface import AlbumDAOInterface
+
+
+          class AlbumSqliteDAO(AlbumDAOInterface):
+              def __init__(self, db_path=None):
+                  self.db_path = db_path
+
+              def connect(self):
+                  conn = sqlite3.connect(self.db_path)
+                  conn.row_factory = sqlite3.Row
+                  return conn
+
+              def findAll(self, limit=None):
+                  conn = self.connect()
+                  cursor = conn.cursor()
+                  if limit:
+                      cursor.execute("SELECT id, title, year, artist FROM albums LIMIT ?", (limit,))
+                  else:
+                      cursor.execute("SELECT id, title, year, artist FROM albums")
+                  rows = cursor.fetchall()
+                  conn.close()
+                  return [dict(row) for row in rows]
+      - type: papier
+        tags: [dao-sqlite3, sql-injection]
+        enonce: "Écris `findById(id)` et `findByYear(year)`, avec des requêtes paramétrées et le retour en liste de dictionnaires. Recopie la classe avec `connect()`."
+        duree: 360
+        setup: |
+          import sqlite3
+          _c = sqlite3.connect("music.db")
+          _c.executescript("""
+          DROP TABLE IF EXISTS albums;
+          CREATE TABLE albums (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, year INTEGER, artist TEXT);
+          INSERT INTO albums (title, year, artist) VALUES ('Kind of Blue', 1959, 'Miles Davis');
+          INSERT INTO albums (title, year, artist) VALUES ('A Love Supreme', 1965, 'John Coltrane');
+          INSERT INTO albums (title, year, artist) VALUES ('Giant Steps', 1959, 'John Coltrane');
+          """)
+          _c.commit()
+          _c.close()
+          class AlbumDAOInterface:
+              pass
+          fake_module("app.models.AlbumDAOInterface", AlbumDAOInterface=AlbumDAOInterface)
+        tests: |
+          def test_by_id():
+              """findById(2) renvoie [A Love Supreme]"""
+              res = AlbumSqliteDAO("music.db").findById(2)
+              assert len(res) == 1 and res[0]["title"] == "A Love Supreme"
+
+          def test_by_year():
+              """findByYear(1959) renvoie 2 albums"""
+              assert len(AlbumSqliteDAO("music.db").findByYear(1959)) == 2
+
+          def test_parametre():
+              """la requête est paramétrée (pas d'injection)"""
+              assert AlbumSqliteDAO("music.db").findById("1 OR 1=1") == []
+        grille:
+          - {critere: "`WHERE id = ?` avec `(id,)`", points: 1.5, auto: test_by_id}
+          - {critere: "`WHERE year = ?` avec `(year,)`", points: 1.5, auto: test_by_year}
+          - {critere: "Aucune f-string dans le SQL", points: 1, auto: test_parametre}
+          - {critere: "Connexion fermée avant le `return`", points: 1}
+        solution: |
+          import sqlite3
+          from app.models.AlbumDAOInterface import AlbumDAOInterface
+
+
+          class AlbumSqliteDAO(AlbumDAOInterface):
+              def __init__(self, db_path=None):
+                  self.db_path = db_path
+
+              def connect(self):
+                  conn = sqlite3.connect(self.db_path)
+                  conn.row_factory = sqlite3.Row
+                  return conn
+
+              def findById(self, id):
+                  conn = self.connect()
+                  cursor = conn.cursor()
+                  cursor.execute("SELECT id, title, year, artist FROM albums WHERE id = ?", (id,))
+                  rows = cursor.fetchall()
+                  conn.close()
+                  return [dict(row) for row in rows]
+
+              def findByYear(self, year):
+                  conn = self.connect()
+                  cursor = conn.cursor()
+                  cursor.execute("SELECT id, title, year, artist FROM albums WHERE year = ?", (year,))
+                  rows = cursor.fetchall()
+                  conn.close()
+                  return [dict(row) for row in rows]
+      - type: papier
+        tags: [dao-interface, mvcs, sql-injection]
+        enonce: "Question de cours : pourquoi définir une interface `AlbumDAOInterface` ? Et pourquoi les requêtes paramétrées ? (5 lignes maximum)"
+        duree: 240
+        grille:
+          - {critere: "L'interface fixe les méthodes que toute implémentation doit fournir", points: 1}
+          - {critere: "On peut changer d'implémentation (sqlite3 → ORM) sans modifier le service", points: 1}
+          - {critere: "Le service dépend de l'abstraction, pas du stockage (logique métier isolée)", points: 1}
+          - {critere: "Les requêtes paramétrées évitent l'injection SQL (le pilote échappe les valeurs)", points: 1}
+        solution: |
+          L'interface définit le contrat (les méthodes connect, findAll, findById, findByYear) que tout DAO
+          doit respecter. Le service ne dépend que de ce contrat : on peut remplacer AlbumSqliteDAO par
+          AlbumSqliteORM (TD02) sans toucher au service ni aux blueprints.
+          Les requêtes paramétrées (?, tuple de valeurs) laissent le pilote échapper les valeurs :
+          une saisie malveillante ne peut pas modifier la requête (pas d'injection SQL).
+
+  - id: "1.12"
+    palier: 4
+    title: "Sujet papier C : école, service + routes filtrées"
+    memo: |
+      **Sujet.** L'application `school` gère des élèves.
+      - Le DAO `StudentSqliteDAO(db_path)` est fourni dans `app/models/StudentDAO.py`. Il propose `findAll()` (une liste de `{"id", "name", "classe"}`), `findById(id)` (un dictionnaire ou `None`) et `findGrades(id)` (une liste de `{"value": ...}`).
+      - Tu écris le service `StudentService` (dans `app/services/StudentService.py`), puis le blueprint `students`.
+    exercises:
+      - type: papier
+        tags: [service, current-app]
+        enonce: "Écris l'en-tête de `StudentService` : les imports et un constructeur `__init__(self, db_path=None)`. Si `db_path` est absent, prends `DATABASE_PATH` dans la configuration de l'application courante. Range le DAO dans `self.sdao`."
+        duree: 240
+        setup: |
+          class _DAO:
+              def __init__(self, db_path=None):
+                  self.db_path = db_path
+          fake_module("app.models.StudentDAO", StudentSqliteDAO=_DAO)
+        tests: |
+          from flask import Flask
+
+          def test_chemin_explicite():
+              """StudentService('x.db') transmet le chemin au DAO"""
+              assert StudentService("x.db").sdao.db_path == "x.db"
+
+          def test_current_app():
+              """sans argument, le chemin vient de current_app.config['DATABASE_PATH']"""
+              app = Flask("t")
+              app.config["DATABASE_PATH"] = "school.db"
+              with app.app_context():
+                  assert StudentService().sdao.db_path == "school.db"
+        grille:
+          - {critere: "`from flask import current_app` et import de `StudentSqliteDAO`", points: 1}
+          - {critere: "`if db_path is None: db_path = current_app.config['DATABASE_PATH']`", points: 1.5, auto: test_current_app}
+          - {critere: "`self.sdao = StudentSqliteDAO(db_path)`", points: 1, auto: test_chemin_explicite}
+          - {critere: "Imports de typage (`List`, `Dict`, `Optional`)", points: 0.5}
+        solution: |
+          from typing import List, Dict, Optional
+          from flask import current_app
+          from app.models.StudentDAO import StudentSqliteDAO
+
+
+          class StudentService:
+              """logique métier des élèves"""
+
+              def __init__(self, db_path=None):
+                  if db_path is None:
+                      db_path = current_app.config['DATABASE_PATH']
+                  self.sdao = StudentSqliteDAO(db_path)
+      - type: papier
+        tags: [service, typing]
+        enonce: "Écris `getClasses() -> List[str]` (les classes distinctes triées) et `getStudentsByClasse(classe) -> List[Dict]`. Recopie le constructeur."
+        duree: 300
+        setup: |
+          class _DAO:
+              def __init__(self, db_path=None):
+                  pass
+              def findAll(self):
+                  return [{"id": 1, "name": "Lina", "classe": "BUT3-A"}, {"id": 2, "name": "Hugo", "classe": "BUT3-B"}, {"id": 3, "name": "Sami", "classe": "BUT3-A"}]
+          fake_module("app.models.StudentDAO", StudentSqliteDAO=_DAO)
+        tests: |
+          def test_classes():
+              """getClasses() == ['BUT3-A', 'BUT3-B']"""
+              assert StudentService("s.db").getClasses() == ["BUT3-A", "BUT3-B"]
+
+          def test_par_classe():
+              """getStudentsByClasse('BUT3-A') renvoie 2 élèves"""
+              assert [s["name"] for s in StudentService("s.db").getStudentsByClasse("BUT3-A")] == ["Lina", "Sami"]
+        grille:
+          - {critere: "`getClasses` : `sorted(set(...))` sur `self.sdao.findAll()`", points: 1.5, auto: test_classes}
+          - {critere: "`getStudentsByClasse` : liste filtrée sur `s['classe'] == classe`", points: 1.5, auto: test_par_classe}
+          - {critere: "Annotations `-> List[str]` et `-> List[Dict]`", points: 1}
+        solution: |
+          from typing import List, Dict
+          from flask import current_app
+          from app.models.StudentDAO import StudentSqliteDAO
+
+
+          class StudentService:
+              def __init__(self, db_path=None):
+                  if db_path is None:
+                      db_path = current_app.config['DATABASE_PATH']
+                  self.sdao = StudentSqliteDAO(db_path)
+
+              def getClasses(self) -> List[str]:
+                  return sorted(set([s["classe"] for s in self.sdao.findAll()]))
+
+              def getStudentsByClasse(self, classe: str) -> List[Dict]:
+                  return [s for s in self.sdao.findAll() if s["classe"] == classe]
+      - type: papier
+        tags: [service, typing]
+        enonce: "Écris `getStudentById(id) -> List[Dict]` (toujours une liste) et `getAverage(id) -> Optional[float]` (arrondie à 1 décimale, `None` s'il n'y a pas de note). Recopie le constructeur."
+        duree: 300
+        setup: |
+          class _DAO:
+              def __init__(self, db_path=None):
+                  pass
+              def findById(self, id):
+                  return {"id": 1, "name": "Lina", "classe": "BUT3-A"} if id == 1 else None
+              def findGrades(self, id):
+                  return [{"value": 12}, {"value": 15}, {"value": 14}] if id == 1 else []
+          fake_module("app.models.StudentDAO", StudentSqliteDAO=_DAO)
+        tests: |
+          def test_by_id():
+              """getStudentById(1) renvoie [Lina] et getStudentById(9) renvoie []"""
+              s = StudentService("s.db")
+              assert s.getStudentById(1) == [{"id": 1, "name": "Lina", "classe": "BUT3-A"}]
+              assert s.getStudentById(9) == []
+
+          def test_average():
+              """getAverage(1) == 13.7 et getAverage(9) is None"""
+              s = StudentService("s.db")
+              assert s.getAverage(1) == 13.7 and s.getAverage(9) is None
+        grille:
+          - {critere: "`getStudentById` renvoie `[res]` ou `[]` (jamais `[None]`)", points: 1.5, auto: test_by_id}
+          - {critere: "`getAverage` : garde-fou `if not grades: return None`", points: 1, auto: test_average}
+          - {critere: "`round(sum(...) / len(grades), 1)`", points: 1, auto: test_average}
+          - {critere: "Annotations `List[Dict]` et `Optional[float]`", points: 0.5}
+        solution: |
+          from typing import List, Dict, Optional
+          from flask import current_app
+          from app.models.StudentDAO import StudentSqliteDAO
+
+
+          class StudentService:
+              def __init__(self, db_path=None):
+                  if db_path is None:
+                      db_path = current_app.config['DATABASE_PATH']
+                  self.sdao = StudentSqliteDAO(db_path)
+
+              def getStudentById(self, id: int) -> List[Dict]:
+                  res = self.sdao.findById(id)
+                  return [res] if res else []
+
+              def getAverage(self, id: int) -> Optional[float]:
+                  grades = self.sdao.findGrades(id)
+                  if not grades:
+                      return None
+                  return round(sum(g["value"] for g in grades) / len(grades), 1)
+      - type: papier
+        tags: [blueprint, request-args, jsonify]
+        enonce: "Écris `app/blueprints/students/routes.py` avec `students_bp` et la route `GET /`. Elle renvoie en JSON tous les élèves, ou seulement ceux d'une classe si l'URL contient `?classe=...`."
+        duree: 360
+        setup: |
+          class _Service:
+              def __init__(self, db_path=None):
+                  pass
+              def getAllStudents(self):
+                  return [{"id": 1, "name": "Lina", "classe": "A"}, {"id": 2, "name": "Hugo", "classe": "B"}]
+              def getStudentsByClasse(self, classe):
+                  return [s for s in self.getAllStudents() if s["classe"] == classe]
+          fake_module("app.services.StudentService", StudentService=_Service)
+        tests: |
+          from flask import Flask
+
+          def _client():
+              app = Flask("t")
+              app.register_blueprint(students_bp, url_prefix="/students")
+              return app.test_client()
+
+          def test_tous():
+              """GET /students/ renvoie les 2 élèves"""
+              r = _client().get("/students/")
+              assert r.status_code == 200 and len(r.get_json()) == 2, f"obtenu {r.status_code} {r.get_data(as_text=True)[:80]}"
+
+          def test_filtre():
+              """GET /students/?classe=B renvoie seulement Hugo"""
+              r = _client().get("/students/?classe=B")
+              assert r.status_code == 200 and [s["name"] for s in r.get_json()] == ["Hugo"]
+        grille:
+          - {critere: "`students_bp = Blueprint('students', __name__, ...)`", points: 1}
+          - {critere: "`classe = request.args.get('classe')`", points: 1.5, auto: test_filtre}
+          - {critere: "`if classe:` → `getStudentsByClasse(classe)`, sinon tous les élèves", points: 1.5, auto: test_tous}
+          - {critere: "`return jsonify(...)`", points: 1}
+        solution: |
+          from flask import Blueprint, request, jsonify, abort
+          from app.services.StudentService import StudentService
+
+          students_bp = Blueprint('students', __name__, template_folder='templates')
+
+
+          @students_bp.route('/', methods=['GET'])
+          def students():
+              ss = StudentService()
+              classe = request.args.get('classe')
+              if classe:
+                  data = ss.getStudentsByClasse(classe)
+              else:
+                  data = ss.getAllStudents()
+              return jsonify(data)
+      - type: papier
+        tags: [route-params, jsonify]
+        enonce: "Ajoute à `students_bp` la route `GET /<id>` (un entier). Elle renvoie l'élève en JSON (`getStudentById` renvoie une liste), ou une erreur 404. Le blueprint et les imports existent déjà."
+        duree: 240
+        setup: |
+          from flask import Blueprint, jsonify, abort
+          students_bp = Blueprint("students", "fake_students")
+          class _Service:
+              def __init__(self, db_path=None):
+                  pass
+              def getStudentById(self, id):
+                  return [{"id": 1, "name": "Lina"}] if id == 1 else []
+          StudentService = _Service
+        tests: |
+          from flask import Flask
+
+          def _client():
+              app = Flask("t")
+              app.register_blueprint(students_bp, url_prefix="/students")
+              return app.test_client()
+
+          def test_ok():
+              """GET /students/1 renvoie Lina"""
+              r = _client().get("/students/1")
+              data = r.get_json()
+              assert r.status_code == 200 and data and (data.get("name") if isinstance(data, dict) else data[0]["name"]) == "Lina"
+
+          def test_404():
+              """GET /students/5 renvoie 404"""
+              assert _client().get("/students/5").status_code == 404
+        grille:
+          - {critere: "`@students_bp.route('/<int:student_id>', methods=['GET'])`", points: 1.5, auto: test_ok}
+          - {critere: "`student = StudentService().getStudentById(student_id)`", points: 1}
+          - {critere: "`if not student: abort(404)`", points: 1, auto: test_404}
+          - {critere: "`return jsonify(student[0])`", points: 0.5}
+        solution: |
+          @students_bp.route('/<int:student_id>', methods=['GET'])
+          def student_view(student_id):
+              student = StudentService().getStudentById(student_id)
+              if not student:
+                  abort(404)
+              return jsonify(student[0])
+      - type: papier
+        tags: [register-bp, url-for]
+        enonce: |
+          1) Écris les lignes de `create_app()` qui importent et enregistrent `students_bp` sous `/students`.
+          2) Quelles URL produisent `url_for('students.student_view', student_id=3)` et `url_for('students.students', classe='BUT3-A')` ?
+        duree: 240
+        grille:
+          - {critere: "`from app.blueprints import students_bp` (dans la fonction)", points: 1}
+          - {critere: "`app.register_blueprint(students_bp, url_prefix='/students')`", points: 1.5}
+          - {critere: "`/students/3`", points: 1}
+          - {critere: "`/students/?classe=BUT3-A`", points: 1}
+        solution: |
+          # 1) dans create_app()
+          from app.blueprints import students_bp
+          app.register_blueprint(students_bp, url_prefix='/students')
+
+          # 2)
+          # url_for('students.student_view', student_id=3)       → /students/3
+          # url_for('students.students', classe='BUT3-A')        → /students/?classe=BUT3-A

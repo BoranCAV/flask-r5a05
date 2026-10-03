@@ -1,0 +1,791 @@
+session:
+  id: 4
+  title: "Contrôle blanc"
+  subtitle: "Deux sujets complets dans les conditions du contrôle : 1 h 30, questions de cours et 3 exercices de code, notés sur 20."
+  is_exam: 1
+  palier_names:
+    1: "Sujets"
+
+lessons:
+  # ===================================================================== SUJET A
+  - id: "CB.A"
+    palier: 1
+    duration: 5400
+    title: "Sujet A : application de recettes"
+    memo: |
+      **Durée : 1 h 30. Barème sur 20.** Aucun document. Réponds à tout, puis clique sur « Rendre la copie ».
+      - Partie 1, questions de cours : 5 points (QCM + une question rédigée).
+      - Exercice 1, modèles ORM : 6 points. Exercice 2, DAO ORM : 5 points. Exercice 3, blueprint + factory : 4 points.
+      - **Schéma de la base `recipes.db` :**
+      - `categories(id PK, name VARCHAR(100) NOT NULL UNIQUE)`
+      - `recipes(id PK, title VARCHAR(200) NOT NULL, minutes INTEGER, category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL)`
+      - `nutrition(id PK, recipe_id INTEGER NOT NULL UNIQUE REFERENCES recipes(id) ON DELETE CASCADE, calories INTEGER)`
+      - `ingredients(id PK, name VARCHAR(100) NOT NULL UNIQUE)`
+      - `recipe_ingredients(recipe_id → recipes(id) ON DELETE CASCADE, ingredient_id → ingredients(id) ON DELETE CASCADE, PRIMARY KEY(recipe_id, ingredient_id))`
+    exercises:
+      - type: qcm
+        points: 0.75
+        tags: [url-for, url-prefix]
+        enonce: "`recipes_bp = Blueprint('recipes', __name__)` est enregistré avec `url_prefix='/recipes'`. Sa route `@recipes_bp.route('/<int:recipe_id>')` est portée par la fonction `recipe_view`. Que renvoie `url_for('recipes.recipe_view', recipe_id=4)` ?"
+        choices: ["`/recipes/4`", "`/recipe_view/4`", "`/recipes/?recipe_id=4`", "`/4`"]
+        answer: 0
+        explication: "Le préfixe du blueprint, suivi du chemin de la route avec le paramètre."
+      - type: qcm
+        points: 0.75
+        tags: [relation-11]
+        enonce: "Côté `Recipe`, comment déclarer la relation vers `Nutrition` (FK `recipe_id` UNIQUE) ?"
+        choices:
+          - "`nutrition = relationship('Nutrition', back_populates='recipe', uselist=False, cascade='all, delete-orphan')`"
+          - "`nutrition = relationship('Nutrition', secondary=recipe_nutrition)`"
+          - "`nutrition_id = Column(Integer, ForeignKey('nutrition.id'))`"
+          - "`nutrition = relationship('nutrition', back_populates='recipes')`"
+        answer: 0
+      - type: qcm
+        points: 0.75
+        tags: [commit, session-orm]
+        enonce: "`session.add(recipe)` puis `session.close()`. La recette n'apparaît pas en base. Pourquoi ?"
+        choices: ["Il manque `session.commit()` avant `close()`", "Il manque `create_all`", "`add` doit être remplacé par `add_all`", "Il faut `expire_on_commit=False`"]
+        answer: 0
+      - type: qcm
+        points: 0.75
+        tags: [loading]
+        enonce: "Pour charger `recipe.ingredients` (N-N) sans problème N+1, quelle option est la plus adaptée ?"
+        choices: ["`selectinload(Recipe.ingredients)`", "`joinedload(Recipe.ingredients)`", "Le lazy loading par défaut", "`.join(Recipe.ingredients)`"]
+        answer: 0
+        explication: "Pour une collection, `selectinload` fait une 2e requête avec IN, sans dupliquer les recettes. `.join` sert à filtrer, pas à charger."
+      - type: papier
+        points: 2
+        tags: [mvcs, factory, blueprint]
+        enonce: "Question de cours (2 points) : décris le rôle de chaque couche MVC-S dans cette application de recettes, puis explique l'intérêt de l'application factory `create_app()`."
+        duree: 600
+        grille:
+          - {critere: "Model : les classes `Recipe`, `Category`… représentent les données", points: 1}
+          - {critere: "DAO : l'accès à la base (ORM), sessions courtes ; le service : la logique métier, typée", points: 1}
+          - {critere: "Blueprint (contrôleur) : les routes et les paramètres ; la vue : les templates ou le JSON", points: 1}
+          - {critere: "Factory : crée et configure l'app, enregistre les blueprints, évite les imports circulaires, facilite les tests", points: 1}
+        solution: |
+          Model : Recipe, Category, Nutrition, Ingredient représentent les données (classes ORM qui héritent de
+          Base + BaseModelMixin), sans traitement.
+          DAO : RecipeSqliteORM centralise l'accès à la base (sessions courtes, try/finally, chargement des
+          relations). Service : RecipeService contient la logique métier et ne dépend pas du stockage.
+          Contrôleur : les blueprints (recipes_bp…) reçoivent les requêtes, lisent les paramètres et appellent
+          le service. Vue : les templates Jinja ou les réponses jsonify.
+          create_app() crée l'application, la configure (DATABASE_PATH, secret_key) et enregistre les
+          blueprints. L'import des blueprints dans la fonction évite les imports circulaires, et on peut créer
+          une app de test avec une autre configuration.
+      - type: papier
+        points: 6
+        tags: [schema-to-model, relation-1N, relation-11, relation-NN, association-table]
+        enonce: "Exercice 1 (6 points) : écris `recipe_ingredients`, `Category`, `Recipe`, `Nutrition` et `Ingredient`, avec toutes les relations et les `back_populates` (`Category.recipes`, `Recipe.category`, `Recipe.nutrition`, `Nutrition.recipe`, `Recipe.ingredients`, `Ingredient.recipes`). `Base` et `BaseModelMixin` viennent de `app.models.base`."
+        duree: 1500
+        setup: |
+          from sqlalchemy.orm import declarative_base
+          Base = declarative_base()
+          class BaseModelMixin:
+              pass
+          fake_module("app.models.base", Base=Base, BaseModelMixin=BaseModelMixin)
+        tests: |
+          from sqlalchemy import inspect, create_engine
+          from sqlalchemy.orm import sessionmaker
+
+          def test_association():
+              """recipe_ingredients : PK composée, FK CASCADE"""
+              assert {c.name for c in recipe_ingredients.primary_key.columns} == {"recipe_id", "ingredient_id"}
+              assert {list(c.foreign_keys)[0].target_fullname: list(c.foreign_keys)[0].ondelete for c in recipe_ingredients.columns} == {"recipes.id": "CASCADE", "ingredients.id": "CASCADE"}
+
+          def test_category():
+              """Category.recipes ↔ Recipe.category, category_id SET NULL"""
+              assert inspect(Category).relationships["recipes"].back_populates == "category"
+              fk = list(Recipe.__table__.c.category_id.foreign_keys)[0]
+              assert fk.target_fullname == "categories.id" and fk.ondelete == "SET NULL"
+
+          def test_nutrition():
+              """Recipe.nutrition 1-1 (uselist=False, cascade) ; Nutrition.recipe_id unique non nul CASCADE"""
+              r = inspect(Recipe).relationships["nutrition"]
+              assert r.uselist is False and r.cascade.delete_orphan and r.back_populates == "recipe"
+              c = Nutrition.__table__.c.recipe_id
+              assert c.unique and c.nullable is False and list(c.foreign_keys)[0].ondelete == "CASCADE"
+
+          def test_ingredients():
+              """Recipe.ingredients ↔ Ingredient.recipes via secondary"""
+              r = inspect(Recipe).relationships["ingredients"]
+              assert r.secondary is recipe_ingredients and r.back_populates == "recipes"
+              assert inspect(Ingredient).relationships["recipes"].back_populates == "ingredients"
+
+          def test_contraintes():
+              """noms uniques et obligatoires, titre obligatoire"""
+              assert Category.__table__.c.name.unique and Ingredient.__table__.c.name.unique
+              assert Recipe.__table__.c.title.nullable is False
+
+          def test_comportement():
+              """insertion complète, et suppression de la recette → nutrition supprimée"""
+              e = create_engine("sqlite://")
+              Base.metadata.create_all(e)
+              s = sessionmaker(bind=e)()
+              r = Recipe(title="Crêpes", minutes=20, category=Category(name="Dessert"))
+              r.nutrition = Nutrition(calories=220)
+              r.ingredients = [Ingredient(name="Farine"), Ingredient(name="Lait")]
+              s.add(r)
+              s.commit()
+              s.delete(r)
+              s.commit()
+              assert s.query(Nutrition).count() == 0 and s.query(Ingredient).count() == 2
+        grille:
+          - {critere: "`recipe_ingredients = Table(...)` : `Base.metadata`, 2 FK CASCADE, PK composée", points: 1, auto: test_association}
+          - {critere: "`Category` : table, `name` unique et obligatoire, `recipes = relationship('Recipe', back_populates='category')`", points: 1, auto: test_category}
+          - {critere: "`Recipe.category_id` : FK `categories.id`, `ondelete='SET NULL'`, nullable + `category = relationship(...)`", points: 1, auto: test_category}
+          - {critere: "`Recipe.nutrition` : `uselist=False`, `cascade='all, delete-orphan'`", points: 1, auto: test_nutrition}
+          - {critere: "`Nutrition.recipe_id` : FK CASCADE, `unique=True`, `nullable=False` + `recipe = relationship(...)`", points: 1, auto: test_nutrition}
+          - {critere: "`Recipe.ingredients` / `Ingredient.recipes` avec `secondary=recipe_ingredients`", points: 1, auto: test_ingredients}
+          - {critere: "Héritage `(Base, BaseModelMixin)`, `__tablename__` corrects", points: 0.5, auto: test_contraintes}
+          - {critere: "Le tout fonctionne (insertion, cascade)", points: 0.5, auto: test_comportement}
+        solution: |
+          from sqlalchemy import Table, Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import relationship
+          from app.models.base import Base, BaseModelMixin
+
+          recipe_ingredients = Table(
+              'recipe_ingredients',
+              Base.metadata,
+              Column('recipe_id', Integer, ForeignKey('recipes.id', ondelete='CASCADE'), primary_key=True),
+              Column('ingredient_id', Integer, ForeignKey('ingredients.id', ondelete='CASCADE'), primary_key=True)
+          )
+
+
+          class Category(Base, BaseModelMixin):
+              __tablename__ = 'categories'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              name = Column(String(100), unique=True, nullable=False)
+              recipes = relationship('Recipe', back_populates='category')
+
+
+          class Recipe(Base, BaseModelMixin):
+              __tablename__ = 'recipes'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              title = Column(String(200), nullable=False)
+              minutes = Column(Integer, nullable=True)
+              category_id = Column(Integer, ForeignKey('categories.id', ondelete='SET NULL'), nullable=True)
+
+              category = relationship('Category', back_populates='recipes')
+              nutrition = relationship('Nutrition', back_populates='recipe', uselist=False, cascade='all, delete-orphan')
+              ingredients = relationship('Ingredient', secondary=recipe_ingredients, back_populates='recipes')
+
+
+          class Nutrition(Base, BaseModelMixin):
+              __tablename__ = 'nutrition'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              recipe_id = Column(Integer, ForeignKey('recipes.id', ondelete='CASCADE'), unique=True, nullable=False)
+              calories = Column(Integer)
+              recipe = relationship('Recipe', back_populates='nutrition')
+
+
+          class Ingredient(Base, BaseModelMixin):
+              __tablename__ = 'ingredients'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              name = Column(String(100), unique=True, nullable=False)
+              recipes = relationship('Recipe', secondary=recipe_ingredients, back_populates='ingredients')
+      - type: papier
+        points: 5
+        tags: [dao-orm, loading, join, try-finally]
+        enonce: |
+          Exercice 2 (5 points) : écris `RecipeSqliteORM` :
+          - `__init__(db_uri)` (moteur + `sessionmaker` avec `expire_on_commit=False`) et `connect()` ;
+          - `_query_with_relations(session)` : `category` et `nutrition` (to-one), `ingredients` (collection) ;
+          - `findByIngredient(name)` : les recettes qui contiennent l'ingrédient (insensible à la casse), triées par titre ;
+          - `findQuick(max_minutes)` : les recettes de `max_minutes` minutes ou moins, triées par durée.
+        duree: 1500
+        setup: |
+          from sqlalchemy import Table, Column, Integer, String, ForeignKey, create_engine
+          from sqlalchemy.orm import declarative_base, relationship, sessionmaker, joinedload, selectinload
+          Base = declarative_base()
+          recipe_ingredients = Table('recipe_ingredients', Base.metadata,
+              Column('recipe_id', Integer, ForeignKey('recipes.id', ondelete='CASCADE'), primary_key=True),
+              Column('ingredient_id', Integer, ForeignKey('ingredients.id', ondelete='CASCADE'), primary_key=True))
+          class Category(Base):
+              __tablename__ = 'categories'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(100), unique=True, nullable=False)
+              recipes = relationship('Recipe', back_populates='category')
+          class Recipe(Base):
+              __tablename__ = 'recipes'
+              id = Column(Integer, primary_key=True)
+              title = Column(String(200), nullable=False)
+              minutes = Column(Integer)
+              category_id = Column(Integer, ForeignKey('categories.id', ondelete='SET NULL'))
+              category = relationship('Category', back_populates='recipes')
+              nutrition = relationship('Nutrition', back_populates='recipe', uselist=False, cascade='all, delete-orphan')
+              ingredients = relationship('Ingredient', secondary=recipe_ingredients, back_populates='recipes')
+          class Nutrition(Base):
+              __tablename__ = 'nutrition'
+              id = Column(Integer, primary_key=True)
+              recipe_id = Column(Integer, ForeignKey('recipes.id', ondelete='CASCADE'), unique=True, nullable=False)
+              calories = Column(Integer)
+              recipe = relationship('Recipe', back_populates='nutrition')
+          class Ingredient(Base):
+              __tablename__ = 'ingredients'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(100), unique=True, nullable=False)
+              recipes = relationship('Recipe', secondary=recipe_ingredients, back_populates='ingredients')
+          def _fill(engine):
+              Base.metadata.create_all(engine)
+              s = sessionmaker(bind=engine)()
+              dessert, plat = Category(name='Dessert'), Category(name='Plat')
+              farine, lait, oeuf, riz = Ingredient(name='Farine'), Ingredient(name='Lait'), Ingredient(name='Oeuf'), Ingredient(name='Riz')
+              s.add_all([
+                  Recipe(title='Crêpes', minutes=20, category=dessert, nutrition=Nutrition(calories=220), ingredients=[farine, lait, oeuf]),
+                  Recipe(title='Risotto', minutes=35, category=plat, nutrition=Nutrition(calories=450), ingredients=[riz, lait]),
+                  Recipe(title='Omelette', minutes=10, category=plat, ingredients=[oeuf]),
+                  Recipe(title='Gâteau', minutes=45, category=dessert, ingredients=[farine, oeuf, lait]),
+              ])
+              s.commit()
+              s.close()
+          fake_module("app.models.Recipe", Recipe=Recipe)
+          fake_module("app.models.Ingredient", Ingredient=Ingredient)
+        tests: |
+          def _dao():
+              d = RecipeSqliteORM("sqlite://")
+              _fill(d.engine)
+              return d
+
+          def test_connect():
+              """connect() : session avec expire_on_commit=False"""
+              s = _dao().connect()
+              assert s.expire_on_commit is False
+              s.close()
+
+          def test_relations():
+              """les relations sont lisibles après close"""
+              d = _dao()
+              s = d.connect()
+              r = d._query_with_relations(s).filter(Recipe.title == "Crêpes").first()
+              s.close()
+              try:
+                  assert r.category.name == "Dessert" and r.nutrition.calories == 220 and len(r.ingredients) == 3
+              except AssertionError:
+                  raise
+              except Exception as e:
+                  raise AssertionError(f"{type(e).__name__} : relations non chargées d'avance")
+
+          def test_ingredient():
+              """findByIngredient('lait') → Crêpes, Gâteau, Risotto"""
+              assert [r.title for r in _dao().findByIngredient("lait")] == ["Crêpes", "Gâteau", "Risotto"]
+
+          def test_quick():
+              """findQuick(20) → Omelette (10), Crêpes (20)"""
+              assert [r.title for r in _dao().findQuick(20)] == ["Omelette", "Crêpes"]
+        grille:
+          - {critere: "`__init__` : `create_engine` + `sessionmaker(bind=..., expire_on_commit=False)` ; `connect()` renvoie une session", points: 1, auto: test_connect}
+          - {critere: "`_query_with_relations` : `joinedload(category)`, `joinedload(nutrition)`, `selectinload(ingredients)`", points: 1.5, auto: test_relations}
+          - {critere: "`findByIngredient` : `.join(Recipe.ingredients).filter(Ingredient.name.ilike(name)).order_by(Recipe.title)`", points: 1.5, auto: test_ingredient}
+          - {critere: "`findQuick` : `filter(Recipe.minutes <= max_minutes).order_by(Recipe.minutes)`", points: 0.5, auto: test_quick}
+          - {critere: "`try / finally: session.close()` dans chaque méthode", points: 0.5}
+        solution: |
+          from sqlalchemy import create_engine
+          from sqlalchemy.orm import sessionmaker, joinedload, selectinload
+          from app.models.Recipe import Recipe
+          from app.models.Ingredient import Ingredient
+
+
+          class RecipeSqliteORM:
+              def __init__(self, db_uri="sqlite:///recipes.db"):
+                  self.engine = create_engine(db_uri, echo=False)
+                  self.SessionFactory = sessionmaker(bind=self.engine, expire_on_commit=False)
+
+              def connect(self):
+                  return self.SessionFactory()
+
+              def _query_with_relations(self, session):
+                  return session.query(Recipe).options(
+                      joinedload(Recipe.category),
+                      joinedload(Recipe.nutrition),
+                      selectinload(Recipe.ingredients)
+                  )
+
+              def findByIngredient(self, name):
+                  session = self.connect()
+                  try:
+                      return (
+                          self._query_with_relations(session)
+                          .join(Recipe.ingredients)
+                          .filter(Ingredient.name.ilike(name))
+                          .order_by(Recipe.title)
+                          .all()
+                      )
+                  finally:
+                      session.close()
+
+              def findQuick(self, max_minutes):
+                  session = self.connect()
+                  try:
+                      return (
+                          self._query_with_relations(session)
+                          .filter(Recipe.minutes <= max_minutes)
+                          .order_by(Recipe.minutes)
+                          .all()
+                      )
+                  finally:
+                      session.close()
+      - type: papier
+        points: 4
+        tags: [blueprint, factory, filters, route-params]
+        enonce: |
+          Exercice 3 (4 points) : écris, dans un seul fichier, `recipes_bp` et `create_app()` (qui enregistre le blueprint sous `/recipes`).
+          - `GET /recipes/?ingredient=lait` : la liste JSON (`to_dict()`) des recettes contenant l'ingrédient. Sans paramètre : toutes les recettes.
+          - `GET /recipes/<id>` : la recette en JSON, ou une erreur 404.
+          Le service `RecipeService` (dans `app.services.RecipeService`) propose `getAllRecipes()`, `getRecipesByIngredient(name)` et `getRecipeById(id)` (une liste).
+        duree: 1200
+        setup: |
+          class _R:
+              def __init__(self, id, title, ings):
+                  self.id, self.title, self.ings = id, title, ings
+              def to_dict(self):
+                  return {"id": self.id, "title": self.title}
+          _D = [_R(1, "Crêpes", ["lait", "farine"]), _R(2, "Omelette", ["oeuf"]), _R(3, "Risotto", ["riz", "lait"])]
+          class _S:
+              def __init__(self, *a, **k):
+                  pass
+              def getAllRecipes(self):
+                  return list(_D)
+              def getRecipesByIngredient(self, n):
+                  return [r for r in _D if n.lower() in r.ings]
+              def getRecipeById(self, id):
+                  return [r for r in _D if r.id == id]
+          fake_module("app.services.RecipeService", RecipeService=_S)
+        tests: |
+          def _c():
+              app = create_app()
+              assert app is not None, "create_app doit retourner app"
+              return app.test_client()
+
+          def test_toutes():
+              """GET /recipes/ → 3 recettes"""
+              r = _c().get("/recipes/")
+              assert r.status_code == 200 and len(r.get_json()) == 3, f"statut {r.status_code}"
+
+          def test_filtre():
+              """GET /recipes/?ingredient=lait → Crêpes, Risotto"""
+              assert [x["title"] for x in _c().get("/recipes/?ingredient=lait").get_json()] == ["Crêpes", "Risotto"]
+
+          def test_detail():
+              """GET /recipes/2 → Omelette ; /recipes/9 → 404"""
+              c = _c()
+              d = c.get("/recipes/2").get_json()
+              assert (d.get("title") if isinstance(d, dict) else d[0]["title"]) == "Omelette"
+              assert c.get("/recipes/9").status_code == 404
+        grille:
+          - {critere: "`recipes_bp = Blueprint('recipes', __name__)` + routes déclarées sur le blueprint", points: 0.5, auto: test_toutes}
+          - {critere: "`request.args.get('ingredient')` + choix de la méthode du service", points: 1, auto: test_filtre}
+          - {critere: "`'/<int:recipe_id>'` + `abort(404)` + `jsonify(...)`", points: 1, auto: test_detail}
+          - {critere: "`create_app()` : `Flask(__name__)`, `register_blueprint(recipes_bp, url_prefix='/recipes')`, `return app`", points: 1.5, auto: test_toutes}
+        solution: |
+          from flask import Flask, Blueprint, request, jsonify, abort
+          from app.services.RecipeService import RecipeService
+
+          recipes_bp = Blueprint('recipes', __name__)
+
+
+          @recipes_bp.route('/', methods=['GET'])
+          def recipes():
+              rs = RecipeService()
+              ingredient = request.args.get('ingredient')
+              data = rs.getRecipesByIngredient(ingredient) if ingredient else rs.getAllRecipes()
+              return jsonify([r.to_dict() for r in data])
+
+
+          @recipes_bp.route('/<int:recipe_id>', methods=['GET'])
+          def recipe_view(recipe_id):
+              res = RecipeService().getRecipeById(recipe_id)
+              if not res:
+                  abort(404)
+              return jsonify(res[0].to_dict())
+
+
+          def create_app():
+              app = Flask(__name__)
+              app.register_blueprint(recipes_bp, url_prefix='/recipes')
+              return app
+
+  # ===================================================================== SUJET B
+  - id: "CB.B"
+    palier: 1
+    duration: 5400
+    title: "Sujet B : club de sport"
+    memo: |
+      **Durée : 1 h 30. Barème sur 20.** Aucun document. Réponds à tout, puis clique sur « Rendre la copie ».
+      - Partie 1, questions de cours : 5 points. Exercice 1, modèles ORM : 6 points. Exercice 2, DAO ORM : 5 points. Exercice 3, blueprint + factory : 4 points.
+      - **Schéma de la base `club.db` :**
+      - `teams(id PK, name VARCHAR(100) NOT NULL UNIQUE, city VARCHAR(100))`
+      - `players(id PK, name VARCHAR(150) NOT NULL, number INTEGER, team_id INTEGER REFERENCES teams(id) ON DELETE SET NULL)`
+      - `licences(id PK, player_id INTEGER NOT NULL UNIQUE REFERENCES players(id) ON DELETE CASCADE, code VARCHAR(20) NOT NULL UNIQUE)`
+      - `trainings(id PK, label VARCHAR(100) NOT NULL, weekday VARCHAR(10))`
+      - `player_trainings(player_id → players(id) ON DELETE CASCADE, training_id → trainings(id) ON DELETE CASCADE, PRIMARY KEY(player_id, training_id))`
+    exercises:
+      - type: qcm
+        points: 0.75
+        tags: [foreign-key]
+        enonce: "Quelle est la bonne déclaration de `Player.team_id` ?"
+        choices:
+          - "`Column(Integer, ForeignKey('teams.id', ondelete='SET NULL'), nullable=True)`"
+          - "`Column(Integer, ForeignKey('Team.id', ondelete='SET NULL'))`"
+          - "`Column(Integer, ForeignKey('teams.id', ondelete='SET NULL'), nullable=False)`"
+          - "`relationship('teams.id')`"
+        answer: 0
+      - type: qcm
+        points: 0.75
+        tags: [request-args, request-form]
+        enonce: "Pour lire `team` dans l'URL `/players/?team=Lions`, on écrit :"
+        choices: ["`request.args.get('team')`", "`request.form['team']`", "`request.team`", "`url_for('team')`"]
+        answer: 0
+      - type: qcm
+        points: 0.75
+        tags: [init-all, module-package]
+        enonce: "Que contient habituellement `app/blueprints/players/__init__.py` ?"
+        choices: ["`from .routes import players_bp` et `__all__ = ['players_bp']`", "`create_app()`", "Les modèles ORM", "`app.register_blueprint(players_bp)`"]
+        answer: 0
+      - type: qcm
+        points: 0.75
+        tags: [mro, mixin]
+        enonce: "`class Player(Base, BaseModelMixin)`. Les deux parents définissent une méthode `describe()`. Laquelle est appelée par `player.describe()` ?"
+        choices: ["Celle de `Base` (le premier parent dans le MRO)", "Celle de `BaseModelMixin`", "Les deux, l'une après l'autre", "Aucune : erreur d'ambiguïté"]
+        answer: 0
+      - type: papier
+        points: 2
+        tags: [n-plus-1, session-orm, try-finally]
+        enonce: "Question de cours (2 points) : pourquoi le DAO ferme-t-il chaque session dans un `finally` ? Qu'est-ce que le problème N+1, et comment le DAO l'évite-t-il ? À quoi sert `expire_on_commit=False` ?"
+        duree: 600
+        grille:
+          - {critere: "`finally` : la session est fermée même en cas d'exception (pas de fuite de connexion, sessions courtes)", points: 1}
+          - {critere: "N+1 : 1 requête pour la liste plus 1 par objet pour chaque relation chargée en lazy", points: 1}
+          - {critere: "Évité par `_query_with_relations` : `joinedload` (to-one) et `selectinload` (to-many)", points: 1}
+          - {critere: "`expire_on_commit=False` : les objets restent utilisables après la fermeture de la session", points: 1}
+        solution: |
+          Le bloc finally s'exécute toujours, même si la requête lève une exception : la session (et sa
+          connexion) est donc toujours libérée. Le cours recommande des sessions aussi courtes que possible.
+          Problème N+1 : en lazy loading, afficher N joueurs et leur équipe coûte 1 requête + N requêtes.
+          Le DAO précharge les relations dans _query_with_relations : joinedload pour les relations to-one
+          (player.team, player.licence), selectinload pour les collections (player.trainings).
+          expire_on_commit=False évite que SQLAlchemy expire les attributs : les objets renvoyés restent
+          lisibles dans le service et les templates après session.close().
+      - type: papier
+        points: 6
+        tags: [schema-to-model, relation-1N, relation-11, relation-NN, association-table]
+        enonce: "Exercice 1 (6 points) : écris `player_trainings`, `Team`, `Player`, `Licence` et `Training`, avec les relations `Team.players` ↔ `Player.team`, `Player.licence` (1-1, cascade) ↔ `Licence.player`, et `Player.trainings` ↔ `Training.players`. `Base` et `BaseModelMixin` viennent de `app.models.base`."
+        duree: 1500
+        setup: |
+          from sqlalchemy.orm import declarative_base
+          Base = declarative_base()
+          class BaseModelMixin:
+              pass
+          fake_module("app.models.base", Base=Base, BaseModelMixin=BaseModelMixin)
+        tests: |
+          from sqlalchemy import inspect, create_engine
+          from sqlalchemy.orm import sessionmaker
+
+          def test_association():
+              """player_trainings : PK composée, FK CASCADE"""
+              assert {c.name for c in player_trainings.primary_key.columns} == {"player_id", "training_id"}
+              assert {list(c.foreign_keys)[0].target_fullname: list(c.foreign_keys)[0].ondelete for c in player_trainings.columns} == {"players.id": "CASCADE", "trainings.id": "CASCADE"}
+
+          def test_team():
+              """Team.players ↔ Player.team, team_id SET NULL nullable"""
+              assert inspect(Team).relationships["players"].back_populates == "team"
+              c = Player.__table__.c.team_id
+              fk = list(c.foreign_keys)[0]
+              assert fk.target_fullname == "teams.id" and fk.ondelete == "SET NULL" and c.nullable
+
+          def test_licence():
+              """Player.licence 1-1 cascade ; Licence.player_id unique non nul CASCADE ; code unique"""
+              r = inspect(Player).relationships["licence"]
+              assert r.uselist is False and r.cascade.delete_orphan and r.back_populates == "player"
+              c = Licence.__table__.c
+              assert c.player_id.unique and c.player_id.nullable is False and c.code.unique
+
+          def test_trainings():
+              """Player.trainings ↔ Training.players via secondary"""
+              r = inspect(Player).relationships["trainings"]
+              assert r.secondary is player_trainings and r.back_populates == "players"
+              assert inspect(Training).relationships["players"].back_populates == "trainings"
+
+          def test_comportement():
+              """insertion complète ; supprimer le joueur supprime sa licence"""
+              e = create_engine("sqlite://")
+              Base.metadata.create_all(e)
+              s = sessionmaker(bind=e)()
+              p = Player(name="Zoé", number=7, team=Team(name="Lions"))
+              p.licence = Licence(code="LIC-007")
+              p.trainings = [Training(label="Cardio", weekday="lundi")]
+              s.add(p)
+              s.commit()
+              s.delete(p)
+              s.commit()
+              assert s.query(Licence).count() == 0 and s.query(Training).count() == 1
+        grille:
+          - {critere: "`player_trainings = Table(...)` : 2 FK CASCADE, PK composée", points: 1, auto: test_association}
+          - {critere: "`Team` : `name` unique et obligatoire, `players = relationship('Player', back_populates='team')`", points: 1, auto: test_team}
+          - {critere: "`Player.team_id` : FK `teams.id`, `SET NULL`, nullable + `team = relationship(...)`", points: 1, auto: test_team}
+          - {critere: "`Player.licence` : `uselist=False`, `cascade='all, delete-orphan'`", points: 1, auto: test_licence}
+          - {critere: "`Licence` : `player_id` unique, non nul, CASCADE ; `code` unique ; `player = relationship(...)`", points: 1, auto: test_licence}
+          - {critere: "`Player.trainings` / `Training.players` avec `secondary=player_trainings`", points: 1, auto: test_trainings}
+          - {critere: "Le tout fonctionne (insertion, cascade)", points: 1, auto: test_comportement}
+        solution: |
+          from sqlalchemy import Table, Column, Integer, String, ForeignKey
+          from sqlalchemy.orm import relationship
+          from app.models.base import Base, BaseModelMixin
+
+          player_trainings = Table(
+              'player_trainings',
+              Base.metadata,
+              Column('player_id', Integer, ForeignKey('players.id', ondelete='CASCADE'), primary_key=True),
+              Column('training_id', Integer, ForeignKey('trainings.id', ondelete='CASCADE'), primary_key=True)
+          )
+
+
+          class Team(Base, BaseModelMixin):
+              __tablename__ = 'teams'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              name = Column(String(100), unique=True, nullable=False)
+              city = Column(String(100), nullable=True)
+              players = relationship('Player', back_populates='team')
+
+
+          class Player(Base, BaseModelMixin):
+              __tablename__ = 'players'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              name = Column(String(150), nullable=False)
+              number = Column(Integer)
+              team_id = Column(Integer, ForeignKey('teams.id', ondelete='SET NULL'), nullable=True)
+
+              team = relationship('Team', back_populates='players')
+              licence = relationship('Licence', back_populates='player', uselist=False, cascade='all, delete-orphan')
+              trainings = relationship('Training', secondary=player_trainings, back_populates='players')
+
+
+          class Licence(Base, BaseModelMixin):
+              __tablename__ = 'licences'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              player_id = Column(Integer, ForeignKey('players.id', ondelete='CASCADE'), unique=True, nullable=False)
+              code = Column(String(20), unique=True, nullable=False)
+              player = relationship('Player', back_populates='licence')
+
+
+          class Training(Base, BaseModelMixin):
+              __tablename__ = 'trainings'
+              id = Column(Integer, primary_key=True, autoincrement=True)
+              label = Column(String(100), nullable=False)
+              weekday = Column(String(10))
+              players = relationship('Player', secondary=player_trainings, back_populates='trainings')
+      - type: papier
+        points: 5
+        tags: [dao-orm, loading, join, try-finally]
+        enonce: |
+          Exercice 2 (5 points) : écris `PlayerSqliteORM` :
+          - `__init__(db_uri)` et `connect()` ;
+          - `_query_with_relations(session)` : `team` et `licence` (to-one), `trainings` (collection) ;
+          - `findByTeam(team_name)` : les joueurs de l'équipe (nom exact), triés par numéro ;
+          - `findByTraining(label)` : les joueurs inscrits à un entraînement dont le libellé contient `label` (insensible à la casse), triés par nom.
+        duree: 1500
+        setup: |
+          from sqlalchemy import Table, Column, Integer, String, ForeignKey, create_engine
+          from sqlalchemy.orm import declarative_base, relationship, sessionmaker, joinedload, selectinload
+          Base = declarative_base()
+          player_trainings = Table('player_trainings', Base.metadata,
+              Column('player_id', Integer, ForeignKey('players.id', ondelete='CASCADE'), primary_key=True),
+              Column('training_id', Integer, ForeignKey('trainings.id', ondelete='CASCADE'), primary_key=True))
+          class Team(Base):
+              __tablename__ = 'teams'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(100), unique=True, nullable=False)
+              players = relationship('Player', back_populates='team')
+          class Player(Base):
+              __tablename__ = 'players'
+              id = Column(Integer, primary_key=True)
+              name = Column(String(150), nullable=False)
+              number = Column(Integer)
+              team_id = Column(Integer, ForeignKey('teams.id', ondelete='SET NULL'))
+              team = relationship('Team', back_populates='players')
+              licence = relationship('Licence', back_populates='player', uselist=False, cascade='all, delete-orphan')
+              trainings = relationship('Training', secondary=player_trainings, back_populates='players')
+          class Licence(Base):
+              __tablename__ = 'licences'
+              id = Column(Integer, primary_key=True)
+              player_id = Column(Integer, ForeignKey('players.id', ondelete='CASCADE'), unique=True, nullable=False)
+              code = Column(String(20), unique=True, nullable=False)
+              player = relationship('Player', back_populates='licence')
+          class Training(Base):
+              __tablename__ = 'trainings'
+              id = Column(Integer, primary_key=True)
+              label = Column(String(100), nullable=False)
+              players = relationship('Player', secondary=player_trainings, back_populates='trainings')
+          def _fill(engine):
+              Base.metadata.create_all(engine)
+              s = sessionmaker(bind=engine)()
+              lions, aigles = Team(name='Lions'), Team(name='Aigles')
+              cardio, tir = Training(label='Cardio fractionné'), Training(label='Tir au but')
+              s.add_all([
+                  Player(name='Zoé', number=7, team=lions, licence=Licence(code='L7'), trainings=[cardio, tir]),
+                  Player(name='Adam', number=10, team=lions, licence=Licence(code='L10'), trainings=[tir]),
+                  Player(name='Inès', number=4, team=lions, trainings=[cardio]),
+                  Player(name='Noah', number=9, team=aigles, trainings=[cardio]),
+              ])
+              s.commit()
+              s.close()
+          fake_module("app.models.Player", Player=Player)
+          fake_module("app.models.Team", Team=Team)
+          fake_module("app.models.Training", Training=Training)
+        tests: |
+          def _dao():
+              d = PlayerSqliteORM("sqlite://")
+              _fill(d.engine)
+              return d
+
+          def test_team():
+              """findByTeam('Lions') → Inès (4), Zoé (7), Adam (10)"""
+              res = _dao().findByTeam("Lions")
+              assert [p.name for p in res] == ["Inès", "Zoé", "Adam"], f"obtenu {[p.name for p in res]}"
+
+          def test_relations():
+              """team, licence et trainings lisibles après close"""
+              p = _dao().findByTeam("Lions")[1]
+              try:
+                  assert p.team.name == "Lions" and p.licence.code == "L7" and len(p.trainings) == 2
+              except AssertionError:
+                  raise
+              except Exception as e:
+                  raise AssertionError(f"{type(e).__name__} : relations non chargées d'avance")
+
+          def test_training():
+              """findByTraining('cardio') → Inès, Noah, Zoé"""
+              assert [p.name for p in _dao().findByTraining("cardio")] == ["Inès", "Noah", "Zoé"]
+        grille:
+          - {critere: "`__init__` (`expire_on_commit=False`) et `connect()`", points: 1}
+          - {critere: "`_query_with_relations` : `joinedload(team)`, `joinedload(licence)`, `selectinload(trainings)`", points: 1.5, auto: test_relations}
+          - {critere: "`findByTeam` : `.join(Player.team).filter(Team.name == team_name).order_by(Player.number)`", points: 1, auto: test_team}
+          - {critere: "`findByTraining` : `.join(Player.trainings).filter(Training.label.ilike(f\"%{label}%\")).order_by(Player.name)`", points: 1, auto: test_training}
+          - {critere: "`try / finally: session.close()`", points: 0.5}
+        solution: |
+          from sqlalchemy import create_engine
+          from sqlalchemy.orm import sessionmaker, joinedload, selectinload
+          from app.models.Player import Player
+          from app.models.Team import Team
+          from app.models.Training import Training
+
+
+          class PlayerSqliteORM:
+              def __init__(self, db_uri="sqlite:///club.db"):
+                  self.engine = create_engine(db_uri, echo=False)
+                  self.SessionFactory = sessionmaker(bind=self.engine, expire_on_commit=False)
+
+              def connect(self):
+                  return self.SessionFactory()
+
+              def _query_with_relations(self, session):
+                  return session.query(Player).options(
+                      joinedload(Player.team),
+                      joinedload(Player.licence),
+                      selectinload(Player.trainings)
+                  )
+
+              def findByTeam(self, team_name):
+                  session = self.connect()
+                  try:
+                      return (
+                          self._query_with_relations(session)
+                          .join(Player.team)
+                          .filter(Team.name == team_name)
+                          .order_by(Player.number)
+                          .all()
+                      )
+                  finally:
+                      session.close()
+
+              def findByTraining(self, label):
+                  session = self.connect()
+                  try:
+                      return (
+                          self._query_with_relations(session)
+                          .join(Player.trainings)
+                          .filter(Training.label.ilike(f"%{label}%"))
+                          .order_by(Player.name)
+                          .all()
+                      )
+                  finally:
+                      session.close()
+      - type: papier
+        points: 4
+        tags: [blueprint, factory, filters, route-params]
+        enonce: |
+          Exercice 3 (4 points) : écris, dans un seul fichier, `players_bp` et `create_app()` (qui enregistre le blueprint sous `/players`).
+          - `GET /players/?team=Lions` : la liste JSON (`to_dict()`) des joueurs de l'équipe. Sans paramètre : tous les joueurs.
+          - `GET /players/<id>` : le joueur en JSON, ou une erreur 404.
+          Le service `PlayerService` (dans `app.services.PlayerService`) propose `getAllPlayers()`, `getPlayersByTeam(name)` et `getPlayerById(id)` (une liste).
+        duree: 1200
+        setup: |
+          class _P:
+              def __init__(self, id, name, team):
+                  self.id, self.name, self.team = id, name, team
+              def to_dict(self):
+                  return {"id": self.id, "name": self.name}
+          _D = [_P(1, "Zoé", "Lions"), _P(2, "Adam", "Lions"), _P(3, "Noah", "Aigles")]
+          class _S:
+              def __init__(self, *a, **k):
+                  pass
+              def getAllPlayers(self):
+                  return list(_D)
+              def getPlayersByTeam(self, n):
+                  return [p for p in _D if p.team == n]
+              def getPlayerById(self, id):
+                  return [p for p in _D if p.id == id]
+          fake_module("app.services.PlayerService", PlayerService=_S)
+        tests: |
+          def _c():
+              app = create_app()
+              assert app is not None, "create_app doit retourner app"
+              return app.test_client()
+
+          def test_tous():
+              """GET /players/ → 3 joueurs"""
+              r = _c().get("/players/")
+              assert r.status_code == 200 and len(r.get_json()) == 3, f"statut {r.status_code}"
+
+          def test_filtre():
+              """GET /players/?team=Lions → Zoé, Adam"""
+              assert [p["name"] for p in _c().get("/players/?team=Lions").get_json()] == ["Zoé", "Adam"]
+
+          def test_detail():
+              """GET /players/3 → Noah ; /players/8 → 404"""
+              c = _c()
+              d = c.get("/players/3").get_json()
+              assert (d.get("name") if isinstance(d, dict) else d[0]["name"]) == "Noah"
+              assert c.get("/players/8").status_code == 404
+        grille:
+          - {critere: "`players_bp = Blueprint('players', __name__)` + routes sur le blueprint", points: 0.5, auto: test_tous}
+          - {critere: "`request.args.get('team')` + choix de la méthode du service", points: 1, auto: test_filtre}
+          - {critere: "`'/<int:player_id>'` + `abort(404)` + `jsonify(...)`", points: 1, auto: test_detail}
+          - {critere: "`create_app()` : `register_blueprint(players_bp, url_prefix='/players')` + `return app`", points: 1.5, auto: test_tous}
+        solution: |
+          from flask import Flask, Blueprint, request, jsonify, abort
+          from app.services.PlayerService import PlayerService
+
+          players_bp = Blueprint('players', __name__)
+
+
+          @players_bp.route('/', methods=['GET'])
+          def players():
+              ps = PlayerService()
+              team = request.args.get('team')
+              data = ps.getPlayersByTeam(team) if team else ps.getAllPlayers()
+              return jsonify([p.to_dict() for p in data])
+
+
+          @players_bp.route('/<int:player_id>', methods=['GET'])
+          def player_view(player_id):
+              res = PlayerService().getPlayerById(player_id)
+              if not res:
+                  abort(404)
+              return jsonify(res[0].to_dict())
+
+
+          def create_app():
+              app = Flask(__name__)
+              app.register_blueprint(players_bp, url_prefix='/players')
+              return app

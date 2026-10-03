@@ -1,0 +1,16 @@
+# environnement et données locales
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+app/training.db
+
+# supports du cours (PDF et corrections du prof) et fichiers de travail personnels
+Session 1/
+Session 2/
+Session 3/
+graphify-out/
+prompt_claude_code_site_flask.md
+*.zip
+.claude/
+.playwright-mcp/
